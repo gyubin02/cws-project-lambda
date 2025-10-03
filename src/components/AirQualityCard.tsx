@@ -9,10 +9,10 @@ interface AirQualityCardProps {
 }
 
 const gradeConfig = {
-  good: { label: 'Good', color: 'success', icon: CheckCircle, emoji: '😊' },
-  normal: { label: 'Normal', color: 'secondary', icon: AlertCircle, emoji: '😐' },
-  bad: { label: 'Bad', color: 'warning', icon: AlertCircle, emoji: '😷' },
-  verybad: { label: 'Very Bad', color: 'destructive', icon: XCircle, emoji: '🚨' },
+  good: { label: '좋음', color: 'success', icon: CheckCircle, emoji: '😊' },
+  normal: { label: '보통', color: 'secondary', icon: AlertCircle, emoji: '😐' },
+  bad: { label: '나쁨', color: 'warning', icon: AlertCircle, emoji: '😷' },
+  verybad: { label: '매우 나쁨', color: 'destructive', icon: XCircle, emoji: '🚨' },
 };
 
 export function AirQualityCard({ data, onDetailClick }: AirQualityCardProps) {
@@ -29,9 +29,9 @@ export function AirQualityCard({ data, onDetailClick }: AirQualityCardProps) {
           <div>
             <CardTitle className="flex items-center gap-2">
               <Wind className="h-5 w-5 text-primary" />
-              Air Quality
+              공기질
             </CardTitle>
-            <CardDescription>Particulate matter levels</CardDescription>
+            <CardDescription>미세먼지 농도</CardDescription>
           </div>
           <Badge variant={config.color as any} className="ml-2 gap-1">
             <Icon className="h-3 w-3" />
@@ -60,7 +60,7 @@ export function AirQualityCard({ data, onDetailClick }: AirQualityCardProps) {
         </div>
 
         <p className="text-xs text-center text-muted-foreground">
-          Click for detailed thresholds
+          클릭하여 상세 기준 보기
         </p>
       </CardContent>
     </Card>

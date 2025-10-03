@@ -9,9 +9,9 @@ interface TrafficCardProps {
 }
 
 const modeConfig = {
-  car: { label: 'Car', icon: Car, color: 'text-blue-500' },
-  metro: { label: 'Metro', icon: Train, color: 'text-green-500' },
-  bike: { label: 'Bike', icon: Bike, color: 'text-orange-500' },
+  car: { label: '자동차', icon: Car, color: 'text-blue-500' },
+  metro: { label: '지하철', icon: Train, color: 'text-green-500' },
+  bike: { label: '자전거', icon: Bike, color: 'text-orange-500' },
 };
 
 export function TrafficCard({ data, onDetailClick }: TrafficCardProps) {
@@ -31,13 +31,13 @@ export function TrafficCard({ data, onDetailClick }: TrafficCardProps) {
           <div>
             <CardTitle className="flex items-center gap-2">
               <TrendingUp className="h-5 w-5 text-primary" />
-              Traffic & Routes
+              교통 및 경로
             </CardTitle>
-            <CardDescription>Travel time comparison</CardDescription>
+            <CardDescription>이동 시간 비교</CardDescription>
           </div>
           <Badge variant="default" className="ml-2 gap-1">
             <RecommendedIcon className="h-3 w-3" />
-            Best: {recommendedConfig.label}
+            추천: {recommendedConfig.label}
           </Badge>
         </div>
       </CardHeader>
@@ -58,7 +58,7 @@ export function TrafficCard({ data, onDetailClick }: TrafficCardProps) {
                   </div>
                   <div className="flex items-center gap-1">
                     <Clock className="h-3 w-3 text-muted-foreground" />
-                    <span className={isRecommended ? 'font-semibold' : ''}>{time} min</span>
+                    <span className={isRecommended ? 'font-semibold' : ''}>{time}분</span>
                   </div>
                 </div>
                 <div className="h-2 bg-muted rounded-full overflow-hidden">
@@ -81,7 +81,7 @@ export function TrafficCard({ data, onDetailClick }: TrafficCardProps) {
         )}
 
         <p className="text-xs text-center text-muted-foreground">
-          Click for route alternatives
+          클릭하여 경로 대안 보기
         </p>
       </CardContent>
     </Card>

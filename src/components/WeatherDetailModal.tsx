@@ -21,6 +21,13 @@ const weatherIcons: Record<string, string> = {
   snow: '❄️',
 };
 
+const weatherLabels: Record<string, string> = {
+  clear: '맑음',
+  cloudy: '흐림',
+  rain: '비',
+  snow: '눈',
+};
+
 export function WeatherDetailModal({ data, open, onOpenChange }: WeatherDetailModalProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -28,10 +35,10 @@ export function WeatherDetailModal({ data, open, onOpenChange }: WeatherDetailMo
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-2xl">
             <span className="text-3xl">{weatherIcons[data.condition]}</span>
-            Weather Forecast
+            날씨 예보
           </DialogTitle>
           <DialogDescription>
-            Detailed hourly breakdown for your trip
+            여행을 위한 시간별 상세 정보
           </DialogDescription>
         </DialogHeader>
 
@@ -39,15 +46,15 @@ export function WeatherDetailModal({ data, open, onOpenChange }: WeatherDetailMo
           <div className="grid grid-cols-3 gap-4">
             <div className="p-4 rounded-lg bg-muted/50 text-center">
               <div className="text-3xl font-bold text-foreground">{data.temp}°</div>
-              <div className="text-sm text-muted-foreground">Temperature</div>
+              <div className="text-sm text-muted-foreground">기온</div>
             </div>
             <div className="p-4 rounded-lg bg-muted/50 text-center">
               <div className="text-3xl font-bold text-foreground">{data.feels_like}°</div>
-              <div className="text-sm text-muted-foreground">Feels Like</div>
+              <div className="text-sm text-muted-foreground">체감 온도</div>
             </div>
             <div className="p-4 rounded-lg bg-muted/50 text-center">
               <div className="text-3xl font-bold text-foreground">{Math.round(data.pop * 100)}%</div>
-              <div className="text-sm text-muted-foreground">Rain Chance</div>
+              <div className="text-sm text-muted-foreground">강수 확률</div>
             </div>
           </div>
 
@@ -58,7 +65,7 @@ export function WeatherDetailModal({ data, open, onOpenChange }: WeatherDetailMo
                   <Wind className="h-5 w-5 text-primary" />
                   <div>
                     <div className="font-semibold">{data.wind_speed} km/h</div>
-                    <div className="text-xs text-muted-foreground">Wind Speed</div>
+                    <div className="text-xs text-muted-foreground">풍속</div>
                   </div>
                 </div>
               )}
@@ -67,7 +74,7 @@ export function WeatherDetailModal({ data, open, onOpenChange }: WeatherDetailMo
                   <Cloud className="h-5 w-5 text-primary" />
                   <div>
                     <div className="font-semibold">{data.humidity}%</div>
-                    <div className="text-xs text-muted-foreground">Humidity</div>
+                    <div className="text-xs text-muted-foreground">습도</div>
                   </div>
                 </div>
               )}
@@ -77,7 +84,7 @@ export function WeatherDetailModal({ data, open, onOpenChange }: WeatherDetailMo
           <div>
             <h3 className="font-semibold mb-3 flex items-center gap-2">
               <Droplets className="h-4 w-4 text-primary" />
-              Hourly Forecast
+              시간별 예보
             </h3>
             <div className="space-y-2">
               {data.hourly.map((hour, index) => (

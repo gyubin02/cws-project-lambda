@@ -5,7 +5,7 @@ const API_BASE_URL = 'http://localhost:8787/api/v1';
 
 // Mock data for development
 const mockBriefing: Briefing = {
-  summary: "Clear skies with good air quality. Light traffic expected. Metro is your best option today.",
+  summary: "맑은 날씨와 좋은 공기질이 예상됩니다. 교통량이 적어요. 지하철이 오늘 최선의 선택입니다.",
   weather: {
     temp: 18,
     feels_like: 16,
@@ -28,7 +28,7 @@ const mockBriefing: Briefing = {
     pm10: 28,
     pm25: 15,
     grade: 'good',
-    advice: 'Air quality is excellent. Perfect day for outdoor activities.',
+    advice: '공기질이 매우 좋습니다. 야외 활동하기 완벽한 날입니다.',
   },
   traffic: {
     eta: {
@@ -37,7 +37,7 @@ const mockBriefing: Briefing = {
       bike: 55,
     },
     recommend: 'metro',
-    notes: 'Downtown congestion expected. Metro includes 6min walking transfer at City Hall station.',
+    notes: '도심 정체가 예상됩니다. 지하철 이용 시 시청역에서 6분 도보 환승이 필요합니다.',
   },
 };
 

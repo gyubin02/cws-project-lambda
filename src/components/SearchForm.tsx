@@ -11,8 +11,8 @@ interface SearchFormProps {
 }
 
 export function SearchForm({ onSubmit, loading }: SearchFormProps) {
-  const [from, setFrom] = useState('Gangnam Station, Seoul');
-  const [to, setTo] = useState('Hongdae, Seoul');
+  const [from, setFrom] = useState('서울 강남역');
+  const [to, setTo] = useState('서울 홍대');
   const [mode, setMode] = useState<TravelMode>('car');
   const [time, setTime] = useState(() => {
     const now = new Date();
@@ -25,9 +25,9 @@ export function SearchForm({ onSubmit, loading }: SearchFormProps) {
   };
 
   const modes: { value: TravelMode; label: string; icon: string }[] = [
-    { value: 'car', label: 'Car', icon: '🚗' },
-    { value: 'metro', label: 'Metro', icon: '🚇' },
-    { value: 'bike', label: 'Bike', icon: '🚴' },
+    { value: 'car', label: '자동차', icon: '🚗' },
+    { value: 'metro', label: '지하철', icon: '🚇' },
+    { value: 'bike', label: '자전거', icon: '🚴' },
   ];
 
   return (
@@ -36,13 +36,13 @@ export function SearchForm({ onSubmit, loading }: SearchFormProps) {
         <div className="space-y-2">
           <Label htmlFor="from" className="flex items-center gap-2">
             <MapPin className="h-4 w-4 text-primary" />
-            From
+            출발지
           </Label>
           <Input
             id="from"
             value={from}
             onChange={(e) => setFrom(e.target.value)}
-            placeholder="Starting location"
+            placeholder="출발 위치"
             required
             className="transition-smooth"
           />
@@ -51,13 +51,13 @@ export function SearchForm({ onSubmit, loading }: SearchFormProps) {
         <div className="space-y-2">
           <Label htmlFor="to" className="flex items-center gap-2">
             <Navigation className="h-4 w-4 text-accent" />
-            To
+            도착지
           </Label>
           <Input
             id="to"
             value={to}
             onChange={(e) => setTo(e.target.value)}
-            placeholder="Destination"
+            placeholder="목적지"
             required
             className="transition-smooth"
           />
@@ -67,7 +67,7 @@ export function SearchForm({ onSubmit, loading }: SearchFormProps) {
       <div className="space-y-2">
         <Label htmlFor="time" className="flex items-center gap-2">
           <Calendar className="h-4 w-4 text-primary" />
-          Departure Time
+          출발 시간
         </Label>
         <Input
           id="time"
@@ -80,7 +80,7 @@ export function SearchForm({ onSubmit, loading }: SearchFormProps) {
       </div>
 
       <div className="space-y-2">
-        <Label>Travel Mode</Label>
+        <Label>이동 수단</Label>
         <div className="flex gap-2">
           {modes.map((m) => (
             <Button
@@ -103,7 +103,7 @@ export function SearchForm({ onSubmit, loading }: SearchFormProps) {
         className="w-full transition-smooth"
         disabled={loading}
       >
-        {loading ? 'Loading...' : 'Get Briefing'}
+        {loading ? '로딩 중...' : '브리핑 받기'}
       </Button>
     </form>
   );

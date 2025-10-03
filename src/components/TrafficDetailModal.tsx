@@ -17,25 +17,25 @@ interface TrafficDetailModalProps {
 
 const modeConfig = {
   car: { 
-    label: 'Car', 
+    label: '자동차', 
     icon: Car, 
     color: 'text-blue-500',
-    pros: ['Direct route', 'Flexible schedule', 'Comfortable'],
-    cons: ['Traffic congestion', 'Parking costs', 'Higher emissions'],
+    pros: ['직통 경로', '유연한 일정', '편안함'],
+    cons: ['교통 정체', '주차 비용', '높은 배출량'],
   },
   metro: { 
-    label: 'Metro', 
+    label: '지하철', 
     icon: Train, 
     color: 'text-green-500',
-    pros: ['No traffic delays', 'Predictable timing', 'Eco-friendly'],
-    cons: ['Walking to/from stations', 'May require transfers', 'Fixed schedule'],
+    pros: ['교통 지연 없음', '예측 가능한 시간', '친환경'],
+    cons: ['역까지 도보 이동', '환승 필요 가능', '고정된 일정'],
   },
   bike: { 
-    label: 'Bike', 
+    label: '자전거', 
     icon: Bike, 
     color: 'text-orange-500',
-    pros: ['Flexible route', 'Good exercise', 'Zero emissions'],
-    cons: ['Weather dependent', 'Physical effort', 'Limited cargo'],
+    pros: ['유연한 경로', '운동 효과', '무배출'],
+    cons: ['날씨 영향', '체력 소모', '제한된 적재량'],
   },
 };
 
@@ -49,10 +49,10 @@ export function TrafficDetailModal({ data, open, onOpenChange }: TrafficDetailMo
         <DialogHeader>
           <DialogTitle className="text-2xl flex items-center gap-2">
             <Navigation className="h-6 w-6 text-primary" />
-            Route Comparison
+            경로 비교
           </DialogTitle>
           <DialogDescription>
-            Detailed analysis of travel options
+            이동 옵션 상세 분석
           </DialogDescription>
         </DialogHeader>
 
@@ -66,7 +66,7 @@ export function TrafficDetailModal({ data, open, onOpenChange }: TrafficDetailMo
           <div>
             <h3 className="font-semibold mb-3 flex items-center gap-2">
               <Clock className="h-4 w-4 text-primary" />
-              Travel Time Comparison
+              이동 시간 비교
             </h3>
             <div className="space-y-3">
               {sortedEntries.map(([mode, time], index) => {
@@ -87,15 +87,15 @@ export function TrafficDetailModal({ data, open, onOpenChange }: TrafficDetailMo
                         <Icon className={`h-5 w-5 ${config.color}`} />
                         <span className="font-semibold">{config.label}</span>
                         {isRecommended && (
-                          <Badge variant="default" className="ml-2">Recommended</Badge>
+                          <Badge variant="default" className="ml-2">추천</Badge>
                         )}
                         {isFastest && (
-                          <Badge variant="outline" className="ml-2">Fastest</Badge>
+                          <Badge variant="outline" className="ml-2">최단시간</Badge>
                         )}
                       </div>
                       <div className="flex items-center gap-2">
                         <Clock className="h-4 w-4 text-muted-foreground" />
-                        <span className="font-bold text-lg">{time} min</span>
+                        <span className="font-bold text-lg">{time}분</span>
                       </div>
                     </div>
                   </div>
@@ -105,7 +105,7 @@ export function TrafficDetailModal({ data, open, onOpenChange }: TrafficDetailMo
           </div>
 
           <div>
-            <h3 className="font-semibold mb-3">Detailed Analysis</h3>
+            <h3 className="font-semibold mb-3">상세 분석</h3>
             <div className="space-y-4">
               {sortedEntries.map(([mode]) => {
                 const config = modeConfig[mode];
@@ -119,7 +119,7 @@ export function TrafficDetailModal({ data, open, onOpenChange }: TrafficDetailMo
                     </div>
                     <div className="grid grid-cols-2 gap-4 text-sm">
                       <div>
-                        <div className="font-medium text-success mb-1">Pros:</div>
+                        <div className="font-medium text-success mb-1">장점:</div>
                         <ul className="space-y-1">
                           {config.pros.map((pro, index) => (
                             <li key={index} className="flex items-start gap-1">
@@ -130,7 +130,7 @@ export function TrafficDetailModal({ data, open, onOpenChange }: TrafficDetailMo
                         </ul>
                       </div>
                       <div>
-                        <div className="font-medium text-destructive mb-1">Cons:</div>
+                        <div className="font-medium text-destructive mb-1">단점:</div>
                         <ul className="space-y-1">
                           {config.cons.map((con, index) => (
                             <li key={index} className="flex items-start gap-1">

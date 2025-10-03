@@ -25,9 +25,9 @@ const Index = () => {
     try {
       const data = await getBriefing(params);
       setBriefing(data);
-      toast.success('Briefing generated successfully!');
+      toast.success('브리핑이 생성되었습니다!');
     } catch (error) {
-      toast.error('Failed to fetch briefing. Please try again.');
+      toast.error('브리핑을 가져오는데 실패했습니다. 다시 시도해주세요.');
       console.error('Error fetching briefing:', error);
     } finally {
       setLoading(false);
@@ -40,8 +40,8 @@ const Index = () => {
       <header className="border-b bg-card/80 backdrop-blur-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">Outing Briefing</h1>
-            <p className="text-sm text-muted-foreground">Plan your perfect trip</p>
+            <h1 className="text-2xl font-bold text-foreground">외출 브리핑</h1>
+            <p className="text-sm text-muted-foreground">완벽한 여행을 계획하세요</p>
           </div>
           <Button variant="ghost" size="icon">
             <Settings className="h-5 w-5" />
@@ -52,7 +52,7 @@ const Index = () => {
       <main className="container mx-auto px-4 py-8 max-w-6xl">
         {/* Search Form */}
         <div className="mb-8 p-6 rounded-xl bg-card shadow-md">
-          <h2 className="text-xl font-semibold mb-4">Where are you going?</h2>
+          <h2 className="text-xl font-semibold mb-4">어디로 가시나요?</h2>
           <SearchForm onSubmit={handleSearch} loading={loading} />
         </div>
 
@@ -95,9 +95,9 @@ const Index = () => {
         {!loading && !briefing && (
           <div className="text-center py-16">
             <div className="text-6xl mb-4">🗺️</div>
-            <h3 className="text-xl font-semibold mb-2">Ready to plan your trip?</h3>
+            <h3 className="text-xl font-semibold mb-2">여행을 계획할 준비가 되셨나요?</h3>
             <p className="text-muted-foreground">
-              Enter your destination details above to get weather, air quality, and traffic insights.
+              위에서 목적지 정보를 입력하면 날씨, 공기질, 교통 정보를 확인할 수 있습니다.
             </p>
           </div>
         )}
@@ -106,7 +106,7 @@ const Index = () => {
       {/* Footer */}
       <footer className="border-t mt-16 py-6 bg-card/50">
         <div className="container mx-auto px-4 text-center text-sm text-muted-foreground">
-          <p>© 2025 Outing Briefing. Data sources: Weather API, Air Quality API, Traffic API</p>
+          <p>© 2025 외출 브리핑. 데이터 출처: 기상청, 에어코리아, 교통정보</p>
         </div>
       </footer>
 
