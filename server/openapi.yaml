@@ -1,422 +1,513 @@
 openapi: 3.1.0
 info:
   title: Outing Briefing API
-  description: 외출 브리핑 서비스 API - 날씨, 대기질, 교통 정보를 통합하여 제공
+  description: Commute briefing service combining weather, air quality, and multiple traffic sources.
   version: 1.0.0
-  contact:
-    name: API Support
-    email: support@example.com
 servers:
   - url: http://localhost:8787/api/v1
     description: Development server
-  - url: https://api.example.com/api/v1
-    description: Production server
 paths:
-  /briefing:
-    get:
-      summary: 통합 브리핑 정보 조회
-      description: 출발지와 도착지 간의 날씨, 대기질, 교통 정보를 통합하여 제공
-      parameters:
-        - in: query
-          name: lat
-          required: true
-          description: 위도
-          schema:
-            type: number
-            example: 37.5665
-        - in: query
-          name: lon
-          required: true
-          description: 경도
-          schema:
-            type: number
-            example: 126.9780
-        - in: query
-          name: from
-          required: true
-          description: 출발지명
-          schema:
-            type: string
-            example: "강남역"
-        - in: query
-          name: to
-          required: true
-          description: 도착지명
-          schema:
-            type: string
-            example: "서울역"
+  /profile:
+    post:
+      summary: Save user profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileInput'
       responses:
         '200':
-          description: 성공적으로 브리핑 정보를 조회함
+          description: Profile persisted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    get:
+      summary: Fetch user profile
+      parameters:
+        - in: query
+          name: user_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Profile found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+        '404':
+          description: Profile not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /briefing:
+    get:
+      summary: Retrieve integrated commute briefing
+      parameters:
+        - in: query
+          name: user_id
+          required: false
+          description: Stored profile identifier
+          schema:
+            type: string
+        - in: query
+          name: from
+          required: false
+          description: Origin coordinates formatted as "lat,lon"
+          schema:
+            type: string
+            pattern: '^-?\d+\.\d+,-?\d+\.\d+$'
+            example: "37.55,126.98"
+        - in: query
+          name: to
+          required: false
+          description: Destination coordinates formatted as "lat,lon"
+          schema:
+            type: string
+            pattern: '^-?\d+\.\d+,-?\d+\.\d+$'
+            example: "37.40,127.10"
+        - in: query
+          name: time
+          required: false
+          description: Desired departure time (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Briefing composed successfully
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Briefing'
         '400':
-          description: 잘못된 요청
+          description: Missing coordinates and profile
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-        '502':
-          description: 외부 API 오류
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '504':
-          description: 외부 API 타임아웃
+        '404':
+          description: Referenced profile missing
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
   /weather:
     get:
-      summary: 날씨 정보 조회
-      description: 특정 좌표의 날씨 정보를 조회
+      summary: Retrieve weather brief
       parameters:
         - in: query
           name: lat
           required: true
-          description: 위도
           schema:
             type: number
-            example: 37.5665
         - in: query
           name: lon
           required: true
-          description: 경도
           schema:
             type: number
-            example: 126.9780
         - in: query
           name: time
           required: false
-          description: 조회 시간 (ISO8601 형식)
           schema:
             type: string
             format: date-time
       responses:
         '200':
-          description: 성공적으로 날씨 정보를 조회함
+          description: Weather brief available
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/WeatherData'
+                $ref: '#/components/schemas/WeatherBrief'
         '400':
-          description: 잘못된 요청
+          description: Validation error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
   /air:
     get:
-      summary: 대기질 정보 조회
-      description: 특정 지역의 대기질 정보를 조회
+      summary: Retrieve air quality brief
       parameters:
         - in: query
           name: lat
           required: false
-          description: 위도
           schema:
             type: number
-            example: 37.5665
         - in: query
           name: lon
           required: false
-          description: 경도
           schema:
             type: number
-            example: 126.9780
         - in: query
           name: district
           required: false
-          description: 행정구역명
           schema:
             type: string
-            example: "강남구"
       responses:
         '200':
-          description: 성공적으로 대기질 정보를 조회함
+          description: Air quality brief available
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AirQualityData'
+                $ref: '#/components/schemas/AirBrief'
         '400':
-          description: 잘못된 요청
+          description: Validation error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-  /traffic:
+  /traffic/car:
     get:
-      summary: 교통 정보 조회
-      description: 출발지와 도착지 간의 교통 정보를 조회
+      summary: Retrieve TMAP car route brief
       parameters:
-        - in: query
-          name: from
-          required: true
-          description: 출발지 좌표 (위도,경도)
-          schema:
-            type: string
-            pattern: '^-?\d+\.\d+,-?\d+\.\d+$'
-            example: "37.5665,126.9780"
-        - in: query
-          name: to
-          required: true
-          description: 도착지 좌표 (위도,경도)
-          schema:
-            type: string
-            pattern: '^-?\d+\.\d+,-?\d+\.\d+$'
-            example: "37.5172,127.0473"
-        - in: query
-          name: time
-          required: false
-          description: 출발 예정 시간 (ISO8601 형식)
-          schema:
-            type: string
-            format: date-time
+        - $ref: '#/components/parameters/FromParam'
+        - $ref: '#/components/parameters/ToParam'
+        - $ref: '#/components/parameters/TimeParam'
       responses:
         '200':
-          description: 성공적으로 교통 정보를 조회함
+          description: Car route brief
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TrafficData'
+                $ref: '#/components/schemas/TrafficBrief'
         '400':
-          description: 잘못된 요청
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /traffic/transit:
+    get:
+      summary: Retrieve TMAP transit route brief
+      parameters:
+        - $ref: '#/components/parameters/FromParam'
+        - $ref: '#/components/parameters/ToParam'
+        - $ref: '#/components/parameters/TimeParam'
+      responses:
+        '200':
+          description: Transit route brief
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrafficBrief'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /traffic/expressway:
+    get:
+      summary: Retrieve expressway tollgate travel brief
+      parameters:
+        - $ref: '#/components/parameters/FromParam'
+        - $ref: '#/components/parameters/ToParam'
+        - $ref: '#/components/parameters/TimeParam'
+      responses:
+        '200':
+          description: Expressway brief and tollgate metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpresswayTrafficResponse'
+        '400':
+          description: Validation error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
   /healthz:
     get:
-      summary: 헬스체크
-      description: 서버 상태를 확인
+      summary: Health check
       responses:
         '200':
-          description: 서버가 정상 작동 중
+          description: Service operational
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthCheck'
 components:
+  parameters:
+    FromParam:
+      in: query
+      name: from
+      required: true
+      description: Origin coordinates formatted as "lat,lon"
+      schema:
+        type: string
+        pattern: '^-?\d+\.\d+,-?\d+\.\d+$'
+        example: "37.55,126.98"
+    ToParam:
+      in: query
+      name: to
+      required: true
+      description: Destination coordinates formatted as "lat,lon"
+      schema:
+        type: string
+        pattern: '^-?\d+\.\d+,-?\d+\.\d+$'
+        example: "37.40,127.10"
+    TimeParam:
+      in: query
+      name: time
+      required: false
+      description: Requested departure time (ISO 8601)
+      schema:
+        type: string
+        format: date-time
   schemas:
+    SourceStatus:
+      type: string
+      enum: [ok, missing_api_key, upstream_error, timeout, bad_response]
+    Coordinates:
+      type: object
+      properties:
+        lat:
+          type: number
+        lon:
+          type: number
+      required: [lat, lon]
+    TrafficStep:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [drive, metro, bus, walk, bike]
+        name:
+          type: string
+        duration_min:
+          type: number
+    TrafficBrief:
+      type: object
+      properties:
+        source:
+          type: string
+          enum: [tmap, expressway]
+        source_status:
+          $ref: '#/components/schemas/SourceStatus'
+        updated_at:
+          type: string
+          format: date-time
+        mode:
+          type: string
+          enum: [car, transit, bike, walk]
+        eta_minutes:
+          type: number
+        distance_km:
+          type: number
+        fare_krw:
+          type: number
+        transfers:
+          type: integer
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrafficStep'
+        congestion_level:
+          type: string
+          enum: [LOW, MID, HIGH]
+        notes:
+          type: array
+          items:
+            type: string
+      required: [source, source_status, updated_at, mode]
+    WeatherHourly:
+      type: object
+      properties:
+        time:
+          type: string
+          format: date-time
+        temp_c:
+          type: number
+        pop:
+          type: number
+        condition:
+          type: string
+      required: [time, temp_c, pop, condition]
+    WeatherBrief:
+      type: object
+      properties:
+        source:
+          type: string
+          example: kma
+        source_status:
+          $ref: '#/components/schemas/SourceStatus'
+        updated_at:
+          type: string
+          format: date-time
+        temp_c:
+          type: number
+        feels_like_c:
+          type: number
+        condition:
+          type: string
+        pop:
+          type: number
+          description: Precipitation probability (0-1)
+        hourly:
+          type: array
+          items:
+            $ref: '#/components/schemas/WeatherHourly'
+        tmin_c:
+          type: number
+        tmax_c:
+          type: number
+        notes:
+          type: array
+          items:
+            type: string
+      required: [source, source_status, updated_at]
+    AirBrief:
+      type: object
+      properties:
+        source:
+          type: string
+          example: airkorea
+        source_status:
+          $ref: '#/components/schemas/SourceStatus'
+        updated_at:
+          type: string
+          format: date-time
+        pm10:
+          type: number
+        pm25:
+          type: number
+        grade:
+          type: string
+          enum: [good, normal, bad, verybad]
+        advice:
+          type: string
+        station_name:
+          type: string
+        district:
+          type: string
+        notes:
+          type: array
+          items:
+            type: string
+      required: [source, source_status, updated_at]
+    Recommendation:
+      type: object
+      properties:
+        headline:
+          type: string
+        details:
+          type: array
+          items:
+            type: string
+        suggested_mode:
+          type: string
+          enum: [car, transit, bike, walk]
+        leave_earlier_min:
+          type: number
+      required: [headline, details]
     Briefing:
       type: object
       properties:
         summary:
           type: string
-          description: 통합 요약 정보
-          example: "High 24°C · Air GOOD · ETA 43 min"
         notices:
           type: array
           items:
             type: string
-          description: 알림 메시지들
-          example: ["weather_missing_api_key", "air_missing_api_key"]
         weather:
-          type: object
-          properties:
-            source:
-              type: string
-              example: "kma"
-            source_status:
-              type: string
-              enum: [ok, missing_api_key, upstream_error, timeout, bad_response]
-            updated_at:
-              type: string
-              format: date-time
-            sky:
-              type: string
-              enum: [SUNNY, CLOUDY, RAINY]
-            tmin_c:
-              type: number
-            tmax_c:
-              type: number
-            note:
-              type: string
+          $ref: '#/components/schemas/WeatherBrief'
         air:
-          type: object
-          properties:
-            source:
-              type: string
-              example: "airkorea"
-            source_status:
-              type: string
-              enum: [ok, missing_api_key, upstream_error, timeout, bad_response]
-            updated_at:
-              type: string
-              format: date-time
-            pm10:
-              type: number
-            pm25:
-              type: number
-            grade:
-              type: string
-              enum: [GOOD, MODERATE, BAD, VERY_BAD]
-            note:
-              type: string
+          $ref: '#/components/schemas/AirBrief'
         traffic:
           type: object
           properties:
-            source:
+            car:
+              $ref: '#/components/schemas/TrafficBrief'
+            transit:
+              $ref: '#/components/schemas/TrafficBrief'
+            expressway:
+              $ref: '#/components/schemas/TrafficBrief'
+          required: []
+        recommendation:
+          $ref: '#/components/schemas/Recommendation'
+      required: [summary, notices, traffic]
+    ExpresswayTrafficResponse:
+      type: object
+      properties:
+        expressway:
+          $ref: '#/components/schemas/TrafficBrief'
+        meta:
+          type: object
+          properties:
+            fromToll:
               type: string
-              example: "expressway"
-            source_status:
+            toToll:
               type: string
-              enum: [ok, missing_api_key, upstream_error, timeout, bad_response]
-            updated_at:
+      required: [expressway, meta]
+    ProfileInput:
+      type: object
+      properties:
+        user_id:
+          type: string
+        preferred_mode:
+          type: string
+          enum: [car, transit, bike, walk]
+        tz:
+          type: string
+        home:
+          $ref: '#/components/schemas/ProfileLocation'
+        work:
+          $ref: '#/components/schemas/ProfileWorkLocation'
+      required: [user_id, preferred_mode, tz, home, work]
+    ProfileLocation:
+      allOf:
+        - $ref: '#/components/schemas/Coordinates'
+        - type: object
+          properties:
+            label:
+              type: string
+            district:
+              type: string
+    ProfileWorkLocation:
+      allOf:
+        - $ref: '#/components/schemas/Coordinates'
+        - type: object
+          properties:
+            label:
+              type: string
+    Profile:
+      allOf:
+        - $ref: '#/components/schemas/ProfileInput'
+        - type: object
+          properties:
+            last_updated:
               type: string
               format: date-time
-            eta_minutes:
-              type: number
-            congestion_level:
-              type: string
-              enum: [LOW, MID, HIGH]
-            note:
-              type: string
-    WeatherData:
-      type: object
-      properties:
-        temp:
-          type: number
-          description: 기온 (섭씨)
-          example: 20
-        feels_like:
-          type: number
-          description: 체감온도 (섭씨)
-          example: 18
-        condition:
-          type: string
-          description: 날씨 상태
-          enum: [clear, cloudy, rain, snow, storm, fog]
-          example: "clear"
-        pop:
-          type: number
-          description: 강수확률 (0-1)
-          minimum: 0
-          maximum: 1
-          example: 0.1
-        hourly:
-          type: array
-          description: 시간별 예보
-          items:
-            type: object
-            properties:
-              time:
-                type: string
-                format: date-time
-                example: "2024-01-15T10:00:00Z"
-              temp:
-                type: number
-                example: 22
-              pop:
-                type: number
-                minimum: 0
-                maximum: 1
-                example: 0.2
-    AirQualityData:
-      type: object
-      properties:
-        pm10:
-          type: number
-          description: PM10 농도 (㎍/㎥)
-          example: 25
-        pm25:
-          type: number
-          description: PM2.5 농도 (㎍/㎥)
-          example: 12
-        grade:
-          type: string
-          description: 대기질 등급
-          enum: [good, normal, bad, verybad]
-          example: "good"
-        advice:
-          type: string
-          description: 대기질 관련 조언
-          example: "공기질이 좋습니다. 야외 활동에 적합합니다."
-    TrafficData:
-      type: object
-      properties:
-        eta:
-          type: object
-          description: 교통수단별 예상 소요시간 (분)
-          properties:
-            car:
-              type: integer
-              example: 25
-            metro:
-              type: integer
-              example: 20
-            bike:
-              type: integer
-              example: 35
-        recommend:
-          type: string
-          description: 추천 교통수단
-          enum: [car, metro, bike]
-          example: "metro"
-        notes:
-          type: string
-          description: 교통 관련 주의사항
-          example: "심한 교통 체증이 예상됩니다"
+          required: [last_updated]
     HealthCheck:
       type: object
       properties:
         ok:
           type: boolean
-          description: 서버 상태
-          example: true
         time:
           type: string
           format: date-time
-          description: 현재 시간
-          example: "2024-01-15T09:00:00Z"
         uptime:
           type: number
-          description: 서버 가동 시간 (초)
-          example: 3600
-        memory:
-          type: object
-          description: 메모리 사용량
-          properties:
-            rss:
-              type: integer
-              example: 50000000
-            heapTotal:
-              type: integer
-              example: 20000000
-            heapUsed:
-              type: integer
-              example: 15000000
         version:
           type: string
-          example: "1.0.0"
-        environment:
-          type: string
-          example: "development"
+      required: [ok, time]
     Error:
       type: object
       properties:
         error:
           type: string
-          description: 에러 메시지
-          example: "Invalid parameters"
-        code:
+        message:
           type: string
-          description: 에러 코드
-          example: "VALIDATION_ERROR"
-        upstream:
-          type: string
-          description: 실패한 외부 서비스
-          example: "kma"
-        timestamp:
-          type: string
-          format: date-time
-          description: 에러 발생 시간
-          example: "2024-01-15T09:00:00Z"
-        requestId:
-          type: string
-          description: 요청 ID
-          example: "req-1234567890-abcdef"
+      required: [error]

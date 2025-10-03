@@ -10,13 +10,19 @@ const EnvSchema = z.object({
   KMA_SERVICE_KEY: z.string().optional(),
   AIRKOREA_SERVICE_KEY: z.string().optional(),
   EXPRESSWAY_API_KEY: z.string().optional(),
+  TMAP_API_KEY: z.string().optional(),
 
   HTTP_TIMEOUT_MS: z.coerce.number().default(4500),
   HTTP_RETRY: z.coerce.number().default(1),
   CACHE_TTL_SEC: z.coerce.number().default(300),
+  RATE_LIMIT_WINDOW_MS: z.coerce.number().default(60_000),
+  RATE_LIMIT_MAX: z.coerce.number().default(120),
 });
 
 export const ENV = EnvSchema.parse(process.env);
 export const isMock = ENV.MOCK === 1;
 export const hasAllKeys =
-  !!ENV.KMA_SERVICE_KEY && !!ENV.AIRKOREA_SERVICE_KEY && !!ENV.EXPRESSWAY_API_KEY;
+  !!ENV.KMA_SERVICE_KEY &&
+  !!ENV.AIRKOREA_SERVICE_KEY &&
+  !!ENV.EXPRESSWAY_API_KEY &&
+  !!ENV.TMAP_API_KEY;

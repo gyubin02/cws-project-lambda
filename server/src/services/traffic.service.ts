@@ -1,99 +1,151 @@
 /**
- * 교통 서비스
+ * 교통 서비스 (TMAP + Expressway)
  */
 
+import { TmapAdapter } from '../adapters/tmap.adapter';
 import { ExpresswayAdapter } from '../adapters/expressway.adapter';
 import { logger } from '../lib/logger';
 import { UpstreamError } from '../lib/errors';
-import { ExpresswayData, Coordinates } from '../types';
+import { calculateDistance, nearestTollgate } from '../lib/util';
+import type { Coordinates, TrafficBrief, TrafficMode } from '../types';
+import type { SourceStatus } from '../lib/errors';
+
+type CityTrafficResult = {
+  car?: TrafficBrief;
+  transit?: TrafficBrief;
+  walk?: TrafficBrief;
+  bike?: TrafficBrief;
+};
+
+type ExpresswayTrafficResult = {
+  expressway?: TrafficBrief;
+  meta?: { fromToll: string; toToll: string };
+};
 
 export class TrafficService {
-  private expresswayAdapter: ExpresswayAdapter;
+  private readonly tmap: TmapAdapter;
+  private readonly expressway: ExpresswayAdapter;
 
   constructor() {
-    this.expresswayAdapter = new ExpresswayAdapter();
+    this.tmap = new TmapAdapter();
+    this.expressway = new ExpresswayAdapter();
   }
 
-  async getTrafficData(
+  async getCityTraffic(
     from: Coordinates,
     to: Coordinates,
-    time?: Date
-  ): Promise<ExpresswayData> {
-    try {
-      logger.debug({ 
-        from: { lat: from.lat, lon: from.lon },
-        to: { lat: to.lat, lon: to.lon },
-        time: time?.toISOString()
-      }, 'Fetching traffic data');
+    opts: { when?: Date; modes?: TrafficMode[] } = {}
+  ): Promise<CityTrafficResult> {
+    const { when, modes } = opts;
+    const requested = modes ?? ['car', 'transit'];
+    const result: CityTrafficResult = {};
 
-      const trafficData = await this.expresswayAdapter.getTrafficData(
-        from.lat,
-        from.lon,
-        to.lat,
-        to.lon,
-        time
-      );
-
-      logger.info({
-        eta: trafficData.eta,
-        recommend: trafficData.recommend,
-        notes: trafficData.notes,
-      }, 'Traffic data retrieved successfully');
-
-      return trafficData;
-    } catch (error) {
-      logger.error({ 
-        error: error instanceof Error ? error.message : 'Unknown error',
-        from,
-        to,
-      }, 'Failed to get traffic data');
-      
-      throw new UpstreamError('Traffic service unavailable', 'upstream_error');
+    if (requested.includes('car')) {
+      result.car = await this.callTmap('car', from, to, when);
     }
+
+    if (requested.includes('transit')) {
+      result.transit = await this.callTmap('transit', from, to, when);
+    }
+
+    if (requested.includes('walk')) {
+      result.walk = this.estimateActiveMode('walk', from, to, 'tmap');
+    }
+
+    if (requested.includes('bike')) {
+      result.bike = this.estimateActiveMode('bike', from, to, 'tmap');
+    }
+
+    return result;
   }
 
-  async getTrafficSummary(
+  async getExpresswayTraffic(
     from: Coordinates,
     to: Coordinates,
-    time?: Date
-  ): Promise<string> {
+    opts: { when?: Date } = {}
+  ): Promise<ExpresswayTrafficResult> {
+    const fromToll = nearestTollgate(from.lat, from.lon);
+    const toToll = nearestTollgate(to.lat, to.lon);
+
+    logger.debug({ fromToll, toToll }, 'Resolved tollgates for expressway route');
+
     try {
-      const trafficData = await this.getTrafficData(from, to, time);
-      
-      const etaText = this.formatEtaText(trafficData.eta);
-      const recommendText = this.getRecommendText(trafficData.recommend);
-      const notesText = trafficData.notes ? ` (${trafficData.notes})` : '';
-      
-      return `${recommendText} 추천. ${etaText}${notesText}`;
+      const expresswayBrief = await this.expressway.routeExpresswayByTollgate(fromToll.id, toToll.id, opts.when);
+      return {
+        expressway: expresswayBrief,
+        meta: { fromToll: fromToll.id, toToll: toToll.id },
+      };
     } catch (error) {
-      logger.error({ error: error instanceof Error ? error.message : 'Unknown error' }, 'Failed to generate traffic summary');
-      return '교통 정보를 가져올 수 없습니다.';
+      const upstream = error instanceof UpstreamError ? error : undefined;
+      const status: SourceStatus = upstream?.code ?? 'upstream_error';
+      const message = upstream?.message ?? (error instanceof Error ? error.message : 'Unknown error');
+
+      logger.error({ error: message, fromToll: fromToll.id, toToll: toToll.id }, 'Expressway adapter failed');
+
+      return {
+        expressway: this.buildFailureBrief('expressway', 'car', status, message),
+        meta: { fromToll: fromToll.id, toToll: toToll.id },
+      };
     }
   }
 
-  private formatEtaText(eta: { car?: number; metro?: number; bike?: number }): string {
-    const etaParts: string[] = [];
-    
-    if (eta.car !== undefined) {
-      etaParts.push(`자동차 ${eta.car}분`);
+  private async callTmap(
+    mode: Extract<TrafficMode, 'car' | 'transit'>,
+    from: Coordinates,
+    to: Coordinates,
+    when?: Date
+  ): Promise<TrafficBrief> {
+    try {
+      if (mode === 'car') {
+        return await this.tmap.routeCar(from, to, when);
+      }
+      return await this.tmap.routeTransit(from, to, when);
+    } catch (error) {
+      const upstream = error instanceof UpstreamError ? error : undefined;
+      const status: SourceStatus = upstream?.code ?? 'upstream_error';
+      const message = upstream?.message ?? (error instanceof Error ? error.message : 'Unknown error');
+
+      logger.error({ error: message, mode }, 'TMAP adapter failed');
+
+      return this.buildFailureBrief('tmap', mode, status, message);
     }
-    if (eta.metro !== undefined) {
-      etaParts.push(`지하철 ${eta.metro}분`);
-    }
-    if (eta.bike !== undefined) {
-      etaParts.push(`자전거 ${eta.bike}분`);
-    }
-    
-    return etaParts.join(', ');
   }
 
-  private getRecommendText(recommend: 'car' | 'metro' | 'bike'): string {
-    const recommendMap: Record<string, string> = {
-      'car': '자동차',
-      'metro': '지하철',
-      'bike': '자전거',
+  private estimateActiveMode(
+    mode: Extract<TrafficMode, 'walk' | 'bike'>,
+    from: Coordinates,
+    to: Coordinates,
+    source: TrafficBrief['source']
+  ): TrafficBrief {
+    const distance = calculateDistance(from, to);
+    const speedKmh = mode === 'walk' ? 4.5 : 15; // heuristic speeds
+    const etaMinutes = Math.round((distance / speedKmh) * 60);
+
+    return {
+      source,
+      source_status: 'ok',
+      updated_at: new Date().toISOString(),
+      mode,
+      eta_minutes: etaMinutes,
+      distance_km: Math.round(distance * 10) / 10,
+      notes: ['Heuristic estimate pending official TMAP support.'],
+    } satisfies TrafficBrief;
+  }
+
+  private buildFailureBrief(
+    source: TrafficBrief['source'],
+    mode: TrafficMode,
+    status: SourceStatus,
+    note: string
+  ): TrafficBrief {
+    return {
+      source,
+      source_status: status,
+      updated_at: new Date().toISOString(),
+      mode,
+      notes: [note],
     };
-    
-    return recommendMap[recommend] || '알 수 없음';
   }
 }
+
+export const trafficService = new TrafficService();

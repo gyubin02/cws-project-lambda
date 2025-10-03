@@ -2,6 +2,8 @@
  * Expressway (고속도로) API 응답 타입들
  */
 
+import type { TrafficBrief } from './briefing';
+
 export type ExpresswayResponse = {
   response: {
     header: {
@@ -26,15 +28,7 @@ export type ExpresswayResponse = {
   };
 };
 
-export type ExpresswayData = {
-  eta: {
-    car?: number;
-    metro?: number;
-    bike?: number;
-  };
-  recommend: 'car' | 'metro' | 'bike';
-  notes?: string;
-};
+export type ExpresswayData = TrafficBrief;
 
 export type ExpresswayRoute = {
   routeId: string;
@@ -58,4 +52,25 @@ export type ExpresswayTrafficInfo = {
   roadWork: string;
   incident: string;
   weather: string;
+};
+
+export type ExpresswayFixture = {
+  meta: {
+    doc: string;
+    note?: string;
+  };
+  items: Array<{
+    fromToll: string;
+    toToll: string;
+    avgSpeed: number;
+    travelTimeSec: number;
+    trafficStatus: string;
+  }>;
+};
+
+export type ExpresswayTollgate = {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
 };

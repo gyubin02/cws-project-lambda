@@ -2,6 +2,8 @@
  * AirKorea (한국환경공단) API 응답 타입들
  */
 
+import type { AirBrief } from './briefing';
+
 export type AirKoreaResponse = {
   response: {
     header: {
@@ -33,12 +35,7 @@ export type AirKoreaResponse = {
   };
 };
 
-export type AirKoreaData = {
-  pm10: number;
-  pm25: number;
-  grade: 'good' | 'normal' | 'bad' | 'verybad';
-  advice: string;
-};
+export type AirKoreaData = AirBrief;
 
 export type AirKoreaStation = {
   stationName: string;

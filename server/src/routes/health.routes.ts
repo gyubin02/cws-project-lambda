@@ -5,7 +5,7 @@
 import { Router } from 'express';
 import { logger } from '../lib/logger';
 
-const router = Router();
+const router: Router = Router();
 
 router.get('/', (req, res) => {
   const reqId = req.headers['x-request-id'] as string;

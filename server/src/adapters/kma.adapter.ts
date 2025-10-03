@@ -1,103 +1,87 @@
 import { http } from '../lib/http';
 import { ENV, isMock } from '../lib/env';
-import { UpstreamError } from '../lib/errors';
-import { KMAWeatherData } from '../types';
+import { calculateFeelsLike, latLonToGrid, mapWeatherCondition, normalizePop } from '../lib/util';
+import type { WeatherBrief, WeatherHourly } from '../types';
 
-// Minimal normalized shape (extend to match your OpenAPI)
-export type KmaWeather = {
-  source: 'kma';
-  source_status: 'ok'|'missing_api_key'|'upstream_error'|'timeout'|'bad_response';
-  updated_at: string;
-  sky?: 'SUNNY'|'CLOUDY'|'RAINY';
-  tmin_c?: number;
-  tmax_c?: number;
-  note?: string;
+// TODO: Replace stub parsing with KMA Short-Term Forecast 2.0 integration (add official doc citation + URL once available).
+
+type StubObservation = {
+  temp_c: number;
+  humidity: number;
+  wind_mps: number;
+  sky: number;
+  pty: number;
+  pop: number;
+  tmin_c: number;
+  tmax_c: number;
 };
 
-export class KMAAdapter {
-  // Example: convert lat/lon to KMA grid (stub; replace with your util if already present)
-  private toKmaGrid(_lat: number, _lon: number) {
-    // TODO: real LCC conversion → return { nx, ny }
-    return { nx: 60, ny: 127 };
-  }
+const DEFAULT_OBSERVATION: StubObservation = {
+  temp_c: 22,
+  humidity: 60,
+  wind_mps: 1.8,
+  sky: 1,
+  pty: 0,
+  pop: 30,
+  tmin_c: 18,
+  tmax_c: 27,
+};
 
-  async getWeatherData(lat: number, lon: number, _time?: Date): Promise<KMAWeatherData> {
-    if (isMock) {
-      return {
-        temp: 22,
-        feels_like: 23,
-        condition: 'clear',
-        pop: 0.1,
-        hourly: [
-          { time: new Date().toISOString(), temp: 22, pop: 0.1, condition: 'clear' },
-        ],
-      };
-    }
-
-    if (!ENV.KMA_SERVICE_KEY) {
-      throw new UpstreamError('KMA API key missing', 'missing_api_key');
-    }
-
-    try {
-      const { nx, ny } = this.toKmaGrid(lat, lon);
-      // TODO: fill in actual endpoint + params (getVilageFcst/getUltraSrtFcst)
-      const url = 'http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst';
-      const params = {
-        serviceKey: ENV.KMA_SERVICE_KEY, dataType: 'JSON',
-        base_date: '20241003', base_time: '0800', nx, ny, pageNo: 1, numOfRows: 500,
-      };
-
-      await http.get(url, { params });
-      // TODO: parse and map SKY/TMX/TMN from KMA categories
-      return {
-        temp: 22,
-        feels_like: 23,
-        condition: 'clear',
-        pop: 0.1,
-        hourly: [
-          { time: new Date().toISOString(), temp: 22, pop: 0.1, condition: 'clear' },
-        ],
-      };
-    } catch (err: any) {
-      const code = err.code === 'ECONNABORTED' ? 'timeout' : 'upstream_error';
-      throw new UpstreamError(`kma failed: ${err.message}`, code, err.response?.status);
-    }
-  }
-}
-
-// Keep the function export for backward compatibility
-export async function fetchKmaWeather(lat: number, lon: number): Promise<KmaWeather> {
-  if (isMock) {
-    return { source: 'kma', source_status: 'ok', updated_at: new Date().toISOString(),
-      sky: 'SUNNY', tmin_c: 17, tmax_c: 24, note: 'mock' };
-  }
-  if (!ENV.KMA_SERVICE_KEY) {
-    return { source: 'kma', source_status: 'missing_api_key', updated_at: new Date().toISOString(),
-      note: 'KMA_SERVICE_KEY is missing. Provide a key to enable live data.' };
-  }
-
-  try {
-    const adapter = new KMAAdapter();
-    const { nx, ny } = adapter['toKmaGrid'](lat, lon);
-    // TODO: fill in actual endpoint + params (getVilageFcst/getUltraSrtFcst)
-    const url = 'http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst';
-    const params = {
-      serviceKey: ENV.KMA_SERVICE_KEY, dataType: 'JSON',
-      base_date: '20241003', base_time: '0800', nx, ny, pageNo: 1, numOfRows: 500,
-    };
-
-    await http.get(url, { params });
-    // TODO: parse and map SKY/TMX/TMN from KMA categories
+function toHourlySeries(base: Date, pop: number, condition: string): WeatherHourly[] {
+  const series = Array.from({ length: 6 }).map((_, idx) => {
+    const ts = new Date(base.getTime() + idx * 60 * 60 * 1000);
     return {
-      source: 'kma',
-      source_status: 'ok',
-      updated_at: new Date().toISOString(),
-      sky: 'SUNNY',
-      tmin_c: 17,
-      tmax_c: 24,
+      time: ts.toISOString(),
+      temp_c: DEFAULT_OBSERVATION.temp_c + idx * 0.5,
+      pop,
+      condition,
     };
-  } catch (err: any) {
-    const code = err.code === 'ECONNABORTED' ? 'timeout' : 'upstream_error';
-    throw new UpstreamError(`kma failed: ${err.message}`, code, err.response?.status);
+  });
+  return series;
+}
+
+function deriveStatus(): WeatherBrief['source_status'] {
+  return ENV.KMA_SERVICE_KEY ? 'ok' : 'missing_api_key';
+}
+
+export class KMAAdapter {
+  async getWeatherData(lat: number, lon: number, when?: Date): Promise<WeatherBrief> {
+    const status = deriveStatus();
+    const grid = latLonToGrid(lat, lon);
+    const observation = { ...DEFAULT_OBSERVATION };
+    const condition = mapWeatherCondition(observation.pty, observation.sky);
+    const pop = normalizePop(observation.pop);
+
+    const result: WeatherBrief = {
+      source: 'kma',
+      source_status: status,
+      updated_at: new Date().toISOString(),
+      temp_c: observation.temp_c,
+      feels_like_c: Math.round(calculateFeelsLike(observation.temp_c, observation.humidity, observation.wind_mps) * 10) / 10,
+      condition,
+      pop,
+      tmin_c: observation.tmin_c,
+      tmax_c: observation.tmax_c,
+      notes: [
+        `Grid (${grid.nx},${grid.ny}) derived from coordinates.`,
+        status === 'missing_api_key'
+          ? 'Using stub weather data until KMA service key is configured.'
+          : 'Stub data active. Replace with live KMA response parsing.',
+      ],
+    };
+
+    const hourly = toHourlySeries(when ?? new Date(), pop, condition);
+    if (hourly.length) {
+      result.hourly = hourly;
+    }
+
+    if (!isMock && status === 'ok') {
+      // TODO: Perform live requests to getUltraSrtNcst/getVilageFcst endpoints and populate fields above.
+      void http; // keep eslint/ts from flagging until live integration.
+    }
+
+    return result;
   }
 }
+
+export const kmaAdapter = new KMAAdapter();

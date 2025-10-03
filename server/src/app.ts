@@ -7,13 +7,15 @@ import cors from 'cors';
 import helmet from 'helmet';
 import { randomUUID } from 'crypto';
 import { requestLogger, logger } from './lib/logger';
+import { rateLimiter } from './lib/rateLimit';
 import briefingRoutes from './routes/briefing.routes';
 import weatherRoutes from './routes/weather.routes';
 import airRoutes from './routes/air.routes';
 import trafficRoutes from './routes/traffic.routes';
 import healthRoutes from './routes/health.routes';
+import profileRoutes from './routes/profile.routes';
 
-const app = express();
+const app: express.Express = express();
 
 // 보안 미들웨어
 app.use(helmet({
@@ -44,12 +46,14 @@ app.use((req, res, next) => {
 
 // 로깅 미들웨어
 app.use(requestLogger);
+app.use(rateLimiter);
 
 // API 라우트
 app.use('/api/v1/briefing', briefingRoutes);
 app.use('/api/v1/weather', weatherRoutes);
 app.use('/api/v1/air', airRoutes);
 app.use('/api/v1/traffic', trafficRoutes);
+app.use('/api/v1/profile', profileRoutes);
 app.use('/api/v1/healthz', healthRoutes);
 
 // 루트 경로

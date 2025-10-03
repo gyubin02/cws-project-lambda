@@ -3,6 +3,8 @@
  */
 
 import { Coordinates, KMAGridCoordinates } from '../types';
+import tollgateCatalog from '../../data/expressway_tollgates.json';
+import type { ExpresswayTollgate } from '../types';
 
 /**
  * 위도/경도를 KMA 격자 좌표로 변환
@@ -18,7 +20,6 @@ export function latLonToGrid(lat: number, lon: number): KMAGridCoordinates {
   const YO = 136; // 기준점 Y좌표(GRID)
 
   const DEGRAD = Math.PI / 180.0;
-  const RADDEG = 180.0 / Math.PI;
 
   const re = RE / GRID;
   const slat1 = SLAT1 * DEGRAD;
@@ -57,10 +58,33 @@ export function calculateDistance(from: Coordinates, to: Coordinates): number {
   return R * c;
 }
 
+const tollgates: ExpresswayTollgate[] = tollgateCatalog as ExpresswayTollgate[];
+
+export function nearestTollgate(lat: number, lon: number): ExpresswayTollgate {
+  if (tollgates.length === 0) {
+    throw new Error('expressway tollgate catalog is empty');
+  }
+
+  let closest = tollgates[0]!;
+  let minDistance = Number.POSITIVE_INFINITY;
+  const origin: Coordinates = { lat, lon };
+
+  for (const gate of tollgates) {
+    const candidate: Coordinates = { lat: gate.lat, lon: gate.lon };
+    const dist = calculateDistance(origin, candidate);
+    if (dist < minDistance) {
+      minDistance = dist;
+      closest = gate;
+    }
+  }
+
+  return closest;
+}
+
 /**
  * 체감온도 계산 (간단한 공식)
  */
-export function calculateFeelsLike(temp: number, humidity: number, windSpeed: number): number {
+export function calculateFeelsLike(temp: number, humidity: number, _windSpeed: number): number {
   // Heat Index 공식 (화씨 기준)
   const tempF = (temp * 9 / 5) + 32;
   const hi = -42.379 + 
@@ -126,12 +150,47 @@ export function getNearestBaseTime(targetTime?: Date): { baseDate: string; baseT
 /**
  * 좌표 문자열 파싱 ("lat,lon" -> {lat, lon})
  */
+export const COORDINATE_REGEX = /^-?\d+\.\d+,-?\d+\.\d+$/;
+
 export function parseCoordinates(coordStr: string): Coordinates {
-  const [lat, lon] = coordStr.split(',').map(Number);
-  if (isNaN(lat) || isNaN(lon)) {
-    throw new Error(`Invalid coordinates: ${coordStr}`);
+  const trimmed = coordStr.trim();
+  const [latStr, lonStr] = trimmed.split(',');
+  if (latStr === undefined || lonStr === undefined) {
+    throw new Error(`Invalid coordinates: ${trimmed}`);
+  }
+  const lat = Number(latStr);
+  const lon = Number(lonStr);
+  if (Number.isNaN(lat) || Number.isNaN(lon)) {
+    throw new Error(`Invalid coordinates: ${trimmed}`);
   }
   return { lat, lon };
+}
+
+export const LOCATION_INPUT_MESSAGE = "from/to must be 'lat,lon' or a place name (e.g., 강남역).";
+
+export async function parseCoordOrGeocode(
+  value: string,
+  geocodeFn: (query: string) => Promise<Coordinates>
+): Promise<Coordinates> {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error(LOCATION_INPUT_MESSAGE);
+  }
+
+  if (COORDINATE_REGEX.test(trimmed)) {
+    return parseCoordinates(trimmed);
+  }
+
+  try {
+    const coordinates = await geocodeFn(trimmed);
+    if (typeof coordinates?.lat === 'number' && typeof coordinates?.lon === 'number') {
+      return coordinates as Coordinates;
+    }
+  } catch (error) {
+    // ignore and fall through to unified message
+  }
+
+  throw new Error(LOCATION_INPUT_MESSAGE);
 }
 
 /**

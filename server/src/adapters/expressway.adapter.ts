@@ -1,88 +1,81 @@
-import { http } from '../lib/http';
-import { ENV, isMock } from '../lib/env';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { cached } from '../lib/cache';
+import { ENV } from '../lib/env';
 import { UpstreamError } from '../lib/errors';
-import { ExpresswayData } from '../types';
+import type { TrafficBrief } from '../types';
+import type { ExpresswayFixture } from '../types';
 
-export type TrafficBrief = {
-  source: 'expressway';
-  source_status: 'ok'|'missing_api_key'|'upstream_error'|'timeout'|'bad_response';
-  updated_at: string;
-  eta_minutes?: number;
-  congestion_level?: 'LOW'|'MID'|'HIGH';
-  note?: string;
-};
+// TODO: Replace fixture usage with Korea Expressway Open API calls once official docs/links are available.
+
+const FIXTURE_PATH = path.resolve(__dirname, '../../../fixtures/expressway_tollgate.sample.json');
+
+function timeBucket10m(when?: Date): string {
+  const base = when ? when.getTime() : Date.now();
+  const bucket = Math.floor(base / (10 * 60_000));
+  return bucket.toString();
+}
+
+async function loadFixture(): Promise<ExpresswayFixture> {
+  try {
+    const raw = await fs.readFile(FIXTURE_PATH, 'utf8');
+    return JSON.parse(raw) as ExpresswayFixture;
+  } catch (error) {
+    throw new UpstreamError('Failed to read expressway fixture', 'bad_response');
+  }
+}
+
+function deriveStatus(): { status: TrafficBrief['source_status']; notes: string[] } {
+  const status = ENV.EXPRESSWAY_API_KEY ? 'ok' : 'missing_api_key';
+  const notes = status === 'missing_api_key'
+    ? ['Using fixture data. Provide EXPRESSWAY_API_KEY to enable live requests.']
+    : ['Using fixture data pending real API integration.'];
+  return { status, notes };
+}
+
+function mapTrafficStatus(status: string | undefined): TrafficBrief['congestion_level'] | undefined {
+  if (!status) return undefined;
+  const normalized = status.toUpperCase();
+  if (normalized.includes('FREE')) return 'LOW';
+  if (normalized.includes('SLOW')) return 'MID';
+  if (normalized.includes('HEAVY') || normalized.includes('CONGEST')) return 'HIGH';
+  return undefined;
+}
 
 export class ExpresswayAdapter {
-  async getTrafficData(_fromLat: number, _fromLon: number, _toLat: number, _toLon: number, _time?: Date): Promise<ExpresswayData> {
-    if (isMock) {
-      return {
-        eta: {
-          car: 45,
-          metro: 32,
-          bike: 55,
-        },
-        recommend: 'metro',
-        notes: '도심 정체가 예상됩니다. 지하철 이용 시 시청역에서 6분 도보 환승이 필요합니다.',
-      };
-    }
+  async routeExpresswayByTollgate(
+    fromToll: string,
+    toToll: string,
+    when?: Date
+  ): Promise<TrafficBrief> {
+    const cacheKey = `expressway:${fromToll}:${toToll}:${timeBucket10m(when)}`;
+    return cached(cacheKey, async () => {
+      const data = await loadFixture();
+      const match = data.items.find((item) => item.fromToll === fromToll && item.toToll === toToll);
+      if (!match) {
+        throw new UpstreamError(`Expressway fixture missing segment ${fromToll}->${toToll}`, 'bad_response');
+      }
+      const { status, notes } = deriveStatus();
 
-    if (!ENV.EXPRESSWAY_API_KEY) {
-      throw new UpstreamError('Expressway API key missing', 'missing_api_key');
-    }
+      const brief: TrafficBrief = {
+        source: 'expressway',
+        source_status: status,
+        updated_at: new Date().toISOString(),
+        mode: 'car',
+        notes,
+      };
 
-    try {
-      // TODO: choose "tollgate-to-tollgate travel time" endpoint and/or "realtime flow" endpoint
-      const url = 'https://data.ex.co.kr/openapi/traffic/tollgateTravelTime';
-      const params = {
-        serviceKey: ENV.EXPRESSWAY_API_KEY,
-        pageNo: 1, numOfRows: 10, type: 'json',
-        startUnitName: 'START', endUnitName: 'END', // TODO: convert coordinates → section name
-      };
-      await http.get(url, { params });
-      // TODO: parse ETA (minutes) and map congestion → LOW/MID/HIGH
-      return {
-        eta: {
-          car: 45,
-          metro: 32,
-          bike: 55,
-        },
-        recommend: 'metro',
-        notes: '도심 정체가 예상됩니다. 지하철 이용 시 시청역에서 6분 도보 환승이 필요합니다.',
-      };
-    } catch (err: any) {
-      const code = err.code === 'ECONNABORTED' ? 'timeout' : 'upstream_error';
-      throw new UpstreamError(`expressway failed: ${err.message}`, code, err.response?.status);
-    }
+      const eta = Math.round(match.travelTimeSec / 60);
+      brief.eta_minutes = eta;
+
+      const congestion = mapTrafficStatus(match.trafficStatus);
+      if (congestion) {
+        brief.congestion_level = congestion;
+      }
+
+      return brief;
+    });
   }
 }
 
-// Keep the function export for backward compatibility
-export async function fetchTraffic(from: string, to: string): Promise<TrafficBrief> {
-  if (isMock) {
-    return { source: 'expressway', source_status: 'ok', updated_at: new Date().toISOString(),
-      eta_minutes: 43, congestion_level: 'MID', note: 'mock' };
-  }
-  if (!ENV.EXPRESSWAY_API_KEY) {
-    return { source: 'expressway', source_status: 'missing_api_key', updated_at: new Date().toISOString(),
-      note: 'EXPRESSWAY_API_KEY is missing. Provide a key to enable live data.' };
-  }
-
-  try {
-    // TODO: choose "tollgate-to-tollgate travel time" endpoint and/or "realtime flow" endpoint
-    const url = 'https://data.ex.co.kr/openapi/traffic/tollgateTravelTime';
-    const params = {
-      serviceKey: ENV.EXPRESSWAY_API_KEY,
-      pageNo: 1, numOfRows: 10, type: 'json',
-      startUnitName: from, endUnitName: to,
-    };
-    await http.get(url, { params });
-    // TODO: parse ETA (minutes) and map congestion → LOW/MID/HIGH
-    return {
-      source: 'expressway', source_status: 'ok', updated_at: new Date().toISOString(),
-      eta_minutes: 43, congestion_level: 'MID'
-    };
-  } catch (err: any) {
-    const code = err.code === 'ECONNABORTED' ? 'timeout' : 'upstream_error';
-    throw new UpstreamError(`expressway failed: ${err.message}`, code, err.response?.status);
-  }
-}
+export const expresswayAdapter = new ExpresswayAdapter();
