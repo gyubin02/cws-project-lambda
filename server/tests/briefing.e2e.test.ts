@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { app } from '../src/app';
+import app from '../src/app';
 
 describe('GET /api/v1/briefing', () => {
   it('works without keys (mock or missing_api_key graceful)', async () => {

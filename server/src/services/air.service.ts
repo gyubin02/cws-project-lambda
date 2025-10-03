@@ -42,7 +42,7 @@ export class AirService {
         district,
       }, 'Failed to get air quality data');
       
-      throw new UpstreamError('Air quality service unavailable', 'air');
+      throw new UpstreamError('Air quality service unavailable', 'upstream_error');
     }
   }
 

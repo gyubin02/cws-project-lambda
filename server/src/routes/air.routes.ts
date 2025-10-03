@@ -6,8 +6,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { AirService } from '../services/air.service';
 import { logger } from '../lib/logger';
-import { ValidationError, UpstreamError } from '../lib/errors';
-import { parseCoordinates } from '../lib/util';
+import { UpstreamError } from '../lib/errors';
 
 const router = Router();
 const airService = new AirService();
@@ -63,18 +62,10 @@ router.get('/', async (req, res) => {
       stack: error instanceof Error ? error.stack : undefined,
     }, 'Air quality request failed');
 
-    if (error instanceof ValidationError) {
-      return res.status(400).json({
-        error: error.message,
-        code: error.code,
-      });
-    }
-
     if (error instanceof UpstreamError) {
-      return res.status(error.statusCode).json({
+      return res.status(error.status || 500).json({
         error: error.message,
         code: error.code,
-        upstream: error.upstream,
       });
     }
 

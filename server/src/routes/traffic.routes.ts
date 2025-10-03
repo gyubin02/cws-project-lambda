@@ -6,8 +6,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { TrafficService } from '../services/traffic.service';
 import { logger } from '../lib/logger';
-import { ValidationError, UpstreamError } from '../lib/errors';
-import { parseCoordinates } from '../lib/util';
+import { UpstreamError } from '../lib/errors';
 
 const router = Router();
 const trafficService = new TrafficService();
@@ -36,8 +35,10 @@ router.get('/', async (req, res) => {
     }
 
     const { from, to, time } = parseResult.data;
-    const fromCoords = parseCoordinates(from);
-    const toCoords = parseCoordinates(to);
+    const [fromLat, fromLon] = from.split(',').map(Number);
+    const [toLat, toLon] = to.split(',').map(Number);
+    const fromCoords = { lat: fromLat!, lon: fromLon! };
+    const toCoords = { lat: toLat!, lon: toLon! };
     const timeDate = time ? new Date(time) : undefined;
     
     // 교통 데이터 조회
@@ -53,18 +54,10 @@ router.get('/', async (req, res) => {
       stack: error instanceof Error ? error.stack : undefined,
     }, 'Traffic request failed');
 
-    if (error instanceof ValidationError) {
-      return res.status(400).json({
-        error: error.message,
-        code: error.code,
-      });
-    }
-
     if (error instanceof UpstreamError) {
-      return res.status(error.statusCode).json({
+      return res.status(error.status || 500).json({
         error: error.message,
         code: error.code,
-        upstream: error.upstream,
       });
     }
 

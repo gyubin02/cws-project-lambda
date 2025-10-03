@@ -81,6 +81,7 @@ export type KMAWeatherData = {
     time: string;
     temp: number;
     pop: number;
+    condition: string;
   }>;
 };
 

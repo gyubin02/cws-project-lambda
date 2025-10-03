@@ -3,12 +3,12 @@ import { Briefing, SearchParams } from './types';
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 
 export async function getBriefing(params: SearchParams): Promise<Briefing> {
-  const url = new URL(`${API_BASE_URL}/briefing`);
+  const qs = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => {
-    if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
+    if (v !== undefined && v !== null) qs.set(k, String(v));
   });
 
-  const res = await fetch(url.toString(), { method: 'GET' });
+  const res = await fetch(`${API_BASE_URL}/briefing?${qs.toString()}`, { method: 'GET' });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(text || `Briefing request failed: ${res.status}`);

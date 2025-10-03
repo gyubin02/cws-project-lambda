@@ -5,20 +5,20 @@
 import pino from 'pino';
 import { Request, Response } from 'express';
 
-const isDevelopment = process.env.NODE_ENV === 'development';
+const isDevelopment = process.env['NODE_ENV'] === 'development';
 
 export const logger = pino({
   level: isDevelopment ? 'debug' : 'info',
-  transport: isDevelopment
-    ? {
-        target: 'pino-pretty',
-        options: {
-          colorize: true,
-          translateTime: 'SYS:standard',
-          ignore: 'pid,hostname',
-        },
-      }
-    : undefined,
+  ...(isDevelopment && {
+    transport: {
+      target: 'pino-pretty',
+      options: {
+        colorize: true,
+        translateTime: 'SYS:standard',
+        ignore: 'pid,hostname',
+      },
+    },
+  }),
 });
 
 export const requestLogger = (req: Request, res: Response, next: () => void) => {

@@ -48,7 +48,7 @@ export class TrafficService {
         to,
       }, 'Failed to get traffic data');
       
-      throw new UpstreamError('Traffic service unavailable', 'ex');
+      throw new UpstreamError('Traffic service unavailable', 'upstream_error');
     }
   }
 

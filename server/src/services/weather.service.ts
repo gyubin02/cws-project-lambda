@@ -41,7 +41,7 @@ export class WeatherService {
         coordinates,
       }, 'Failed to get weather data');
       
-      throw new UpstreamError('Weather service unavailable', 'kma');
+      throw new UpstreamError('Weather service unavailable', 'upstream_error');
     }
   }
 

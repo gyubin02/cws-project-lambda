@@ -22,7 +22,7 @@ app.use(helmet({
 }));
 
 // CORS 설정
-const corsOrigins = process.env.CORS_ORIGINS?.split(',') || ['http://localhost:3000'];
+const corsOrigins = process.env['CORS_ORIGINS']?.split(',') || ['http://localhost:3000'];
 app.use(cors({
   origin: corsOrigins,
   credentials: true,
@@ -53,7 +53,7 @@ app.use('/api/v1/traffic', trafficRoutes);
 app.use('/api/v1/healthz', healthRoutes);
 
 // 루트 경로
-app.get('/', (req, res) => {
+app.get('/', (_req, res) => {
   res.json({
     service: 'Outing Briefing API',
     version: '1.0.0',
@@ -79,7 +79,7 @@ app.use('*', (req, res) => {
 });
 
 // 전역 에러 핸들러
-app.use((error: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+app.use((error: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   const reqId = (req as any).requestId as string;
   
   logger.error({ 
@@ -91,7 +91,7 @@ app.use((error: any, req: express.Request, res: express.Response, next: express.
 
   res.status(500).json({
     error: 'Internal Server Error',
-    message: process.env.NODE_ENV === 'development' ? String(error?.message || error) : 'Something went wrong',
+    message: process.env['NODE_ENV'] === 'development' ? String(error?.message || error) : 'Something went wrong',
     timestamp: new Date().toISOString(),
     ...(reqId && { requestId: reqId }),
   });
