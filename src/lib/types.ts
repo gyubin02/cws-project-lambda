@@ -1,8 +1,10 @@
 export type TravelMode = 'car' | 'metro' | 'bike';
 
-export type AirQualityGrade = 'good' | 'normal' | 'bad' | 'verybad';
+export type AirQualityGrade = 'GOOD' | 'MODERATE' | 'BAD' | 'VERY_BAD';
 
-export type WeatherCondition = 'clear' | 'cloudy' | 'rain' | 'snow';
+export type WeatherCondition = 'SUNNY' | 'CLOUDY' | 'RAINY';
+
+export type SourceStatus = 'ok' | 'missing_api_key' | 'upstream_error' | 'timeout' | 'bad_response';
 
 export interface HourlyWeather {
   time: string;
@@ -12,42 +14,45 @@ export interface HourlyWeather {
 }
 
 export interface Weather {
-  temp: number;
-  feels_like: number;
-  condition: WeatherCondition;
-  pop: number;
-  hourly: HourlyWeather[];
-  wind_speed?: number;
-  humidity?: number;
+  source: 'kma';
+  source_status: SourceStatus;
+  updated_at: string;
+  sky?: WeatherCondition;
+  tmin_c?: number;
+  tmax_c?: number;
+  note?: string;
 }
 
 export interface AirQuality {
-  pm10: number;
-  pm25: number;
-  grade: AirQualityGrade;
-  advice: string;
+  source: 'airkorea';
+  source_status: SourceStatus;
+  updated_at: string;
+  pm10?: number;
+  pm25?: number;
+  grade?: AirQualityGrade;
+  note?: string;
 }
 
 export interface TrafficInfo {
-  eta: {
-    car?: number;
-    metro?: number;
-    bike?: number;
-  };
-  recommend: TravelMode;
-  notes?: string;
+  source: 'expressway';
+  source_status: SourceStatus;
+  updated_at: string;
+  eta_minutes?: number;
+  congestion_level?: 'LOW' | 'MID' | 'HIGH';
+  note?: string;
 }
 
 export interface Briefing {
   summary: string;
-  weather: Weather;
-  air: AirQuality;
-  traffic: TrafficInfo;
+  notices?: string[];
+  weather?: Weather;
+  air?: AirQuality;
+  traffic?: TrafficInfo;
 }
 
 export interface SearchParams {
+  lat: number;
+  lon: number;
   from: string;
   to: string;
-  time: string;
-  mode: TravelMode;
 }

@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { MapPin, Calendar, Navigation } from 'lucide-react';
+import { MapPin, Navigation } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { SearchParams, TravelMode } from '@/lib/types';
+import { SearchParams } from '@/lib/types';
 
 interface SearchFormProps {
   onSubmit: (params: SearchParams) => void;
@@ -11,24 +11,15 @@ interface SearchFormProps {
 }
 
 export function SearchForm({ onSubmit, loading }: SearchFormProps) {
-  const [from, setFrom] = useState('서울 강남역');
-  const [to, setTo] = useState('서울 홍대');
-  const [mode, setMode] = useState<TravelMode>('car');
-  const [time, setTime] = useState(() => {
-    const now = new Date();
-    return now.toISOString().slice(0, 16);
-  });
+  const [from, setFrom] = useState('강남역');
+  const [to, setTo] = useState('서울역');
+  const [lat, setLat] = useState(37.5665);
+  const [lon, setLon] = useState(126.9780);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit({ from, to, time, mode });
+    onSubmit({ lat, lon, from, to });
   };
-
-  const modes: { value: TravelMode; label: string; icon: string }[] = [
-    { value: 'car', label: '자동차', icon: '🚗' },
-    { value: 'metro', label: '지하철', icon: '🚇' },
-    { value: 'bike', label: '자전거', icon: '🚴' },
-  ];
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
@@ -64,36 +55,33 @@ export function SearchForm({ onSubmit, loading }: SearchFormProps) {
         </div>
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="time" className="flex items-center gap-2">
-          <Calendar className="h-4 w-4 text-primary" />
-          출발 시간
-        </Label>
-        <Input
-          id="time"
-          type="datetime-local"
-          value={time}
-          onChange={(e) => setTime(e.target.value)}
-          required
-          className="transition-smooth"
-        />
-      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-2">
+          <Label htmlFor="lat">위도</Label>
+          <Input
+            id="lat"
+            type="number"
+            step="0.000001"
+            value={lat}
+            onChange={(e) => setLat(parseFloat(e.target.value))}
+            placeholder="37.5665"
+            required
+            className="transition-smooth"
+          />
+        </div>
 
-      <div className="space-y-2">
-        <Label>이동 수단</Label>
-        <div className="flex gap-2">
-          {modes.map((m) => (
-            <Button
-              key={m.value}
-              type="button"
-              variant={mode === m.value ? 'default' : 'outline'}
-              onClick={() => setMode(m.value)}
-              className="flex-1 transition-smooth"
-            >
-              <span className="mr-2 text-lg">{m.icon}</span>
-              {m.label}
-            </Button>
-          ))}
+        <div className="space-y-2">
+          <Label htmlFor="lon">경도</Label>
+          <Input
+            id="lon"
+            type="number"
+            step="0.000001"
+            value={lon}
+            onChange={(e) => setLon(parseFloat(e.target.value))}
+            placeholder="126.9780"
+            required
+            className="transition-smooth"
+          />
         </div>
       </div>
 

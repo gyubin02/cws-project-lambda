@@ -1,25 +1,44 @@
-import { Car, Train, Bike, Clock, TrendingUp } from 'lucide-react';
+import { Car, Train, Bike, Clock, TrendingUp, AlertCircle } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { TrafficInfo, TravelMode } from '@/lib/types';
+import { TrafficInfo, SourceStatus } from '@/lib/types';
 
 interface TrafficCardProps {
   data: TrafficInfo;
   onDetailClick: () => void;
 }
 
-const modeConfig = {
-  car: { label: '자동차', icon: Car, color: 'text-blue-500' },
-  metro: { label: '지하철', icon: Train, color: 'text-green-500' },
-  bike: { label: '자전거', icon: Bike, color: 'text-orange-500' },
+const statusLabels: Record<SourceStatus, string> = {
+  ok: '정상',
+  missing_api_key: 'API 키 없음',
+  upstream_error: '서비스 오류',
+  timeout: '시간 초과',
+  bad_response: '응답 오류',
+};
+
+const statusColors: Record<SourceStatus, string> = {
+  ok: 'success',
+  missing_api_key: 'warning',
+  upstream_error: 'destructive',
+  timeout: 'destructive',
+  bad_response: 'destructive',
+};
+
+const congestionLabels: Record<string, string> = {
+  LOW: '원활',
+  MID: '보통',
+  HIGH: '정체',
+};
+
+const congestionColors: Record<string, string> = {
+  LOW: 'success',
+  MID: 'warning',
+  HIGH: 'destructive',
 };
 
 export function TrafficCard({ data, onDetailClick }: TrafficCardProps) {
-  const recommendedConfig = modeConfig[data.recommend];
-  const RecommendedIcon = recommendedConfig.icon;
-
-  const etaEntries = Object.entries(data.eta).filter(([_, time]) => time !== undefined) as [TravelMode, number][];
-  const maxEta = Math.max(...etaEntries.map(([_, time]) => time));
+  const isError = data.source_status !== 'ok';
+  const hasData = data.eta_minutes !== undefined;
 
   return (
     <Card 
@@ -33,55 +52,52 @@ export function TrafficCard({ data, onDetailClick }: TrafficCardProps) {
               <TrendingUp className="h-5 w-5 text-primary" />
               교통 및 경로
             </CardTitle>
-            <CardDescription>이동 시간 비교</CardDescription>
+            <CardDescription>이동 시간 및 교통 상황</CardDescription>
           </div>
-          <Badge variant="default" className="ml-2 gap-1">
-            <RecommendedIcon className="h-3 w-3" />
-            추천: {recommendedConfig.label}
+          <Badge variant={isError ? statusColors[data.source_status] as any : 'default'} className="ml-2 gap-1">
+            {isError ? statusLabels[data.source_status] : '교통 정보'}
           </Badge>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="space-y-3">
-          {etaEntries.map(([mode, time]) => {
-            const config = modeConfig[mode];
-            const Icon = config.icon;
-            const isRecommended = mode === data.recommend;
-            const widthPercent = (time / maxEta) * 100;
-
-            return (
-              <div key={mode} className="space-y-1">
-                <div className="flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-2">
-                    <Icon className={`h-4 w-4 ${config.color}`} />
-                    <span className={isRecommended ? 'font-semibold' : ''}>{config.label}</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Clock className="h-3 w-3 text-muted-foreground" />
-                    <span className={isRecommended ? 'font-semibold' : ''}>{time}분</span>
-                  </div>
-                </div>
-                <div className="h-2 bg-muted rounded-full overflow-hidden">
-                  <div
-                    className={`h-full transition-all duration-500 ${
-                      isRecommended ? 'bg-primary' : 'bg-muted-foreground'
-                    }`}
-                    style={{ width: `${widthPercent}%` }}
-                  />
-                </div>
+        {isError ? (
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <AlertCircle className="h-4 w-4" />
+            <span className="text-sm">{data.note || '교통 정보를 가져올 수 없습니다.'}</span>
+          </div>
+        ) : hasData ? (
+          <>
+            <div className="text-center">
+              <div className="flex items-center justify-center gap-2 mb-2">
+                <Clock className="h-5 w-5 text-primary" />
+                <span className="text-3xl font-bold text-foreground">{data.eta_minutes}분</span>
               </div>
-            );
-          })}
-        </div>
+              <p className="text-sm text-muted-foreground">예상 소요 시간</p>
+            </div>
 
-        {data.notes && (
-          <div className="pt-4 border-t">
-            <p className="text-sm text-center text-foreground">{data.notes}</p>
+            {data.congestion_level && (
+              <div className="text-center">
+                <Badge variant={congestionColors[data.congestion_level] as any} className="mb-2">
+                  {congestionLabels[data.congestion_level]}
+                </Badge>
+                <p className="text-xs text-muted-foreground">교통 상황</p>
+              </div>
+            )}
+
+            {data.note && (
+              <div className="pt-4 border-t">
+                <p className="text-sm text-center text-foreground">{data.note}</p>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="text-center text-muted-foreground">
+            <span className="text-sm">교통 정보 없음</span>
           </div>
         )}
 
         <p className="text-xs text-center text-muted-foreground">
-          클릭하여 경로 대안 보기
+          클릭하여 상세 정보 보기
         </p>
       </CardContent>
     </Card>

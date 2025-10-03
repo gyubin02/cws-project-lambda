@@ -1,0 +1,422 @@
+openapi: 3.1.0
+info:
+  title: Outing Briefing API
+  description: 외출 브리핑 서비스 API - 날씨, 대기질, 교통 정보를 통합하여 제공
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: support@example.com
+servers:
+  - url: http://localhost:8787/api/v1
+    description: Development server
+  - url: https://api.example.com/api/v1
+    description: Production server
+paths:
+  /briefing:
+    get:
+      summary: 통합 브리핑 정보 조회
+      description: 출발지와 도착지 간의 날씨, 대기질, 교통 정보를 통합하여 제공
+      parameters:
+        - in: query
+          name: lat
+          required: true
+          description: 위도
+          schema:
+            type: number
+            example: 37.5665
+        - in: query
+          name: lon
+          required: true
+          description: 경도
+          schema:
+            type: number
+            example: 126.9780
+        - in: query
+          name: from
+          required: true
+          description: 출발지명
+          schema:
+            type: string
+            example: "강남역"
+        - in: query
+          name: to
+          required: true
+          description: 도착지명
+          schema:
+            type: string
+            example: "서울역"
+      responses:
+        '200':
+          description: 성공적으로 브리핑 정보를 조회함
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Briefing'
+        '400':
+          description: 잘못된 요청
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '502':
+          description: 외부 API 오류
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: 외부 API 타임아웃
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /weather:
+    get:
+      summary: 날씨 정보 조회
+      description: 특정 좌표의 날씨 정보를 조회
+      parameters:
+        - in: query
+          name: lat
+          required: true
+          description: 위도
+          schema:
+            type: number
+            example: 37.5665
+        - in: query
+          name: lon
+          required: true
+          description: 경도
+          schema:
+            type: number
+            example: 126.9780
+        - in: query
+          name: time
+          required: false
+          description: 조회 시간 (ISO8601 형식)
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: 성공적으로 날씨 정보를 조회함
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WeatherData'
+        '400':
+          description: 잘못된 요청
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /air:
+    get:
+      summary: 대기질 정보 조회
+      description: 특정 지역의 대기질 정보를 조회
+      parameters:
+        - in: query
+          name: lat
+          required: false
+          description: 위도
+          schema:
+            type: number
+            example: 37.5665
+        - in: query
+          name: lon
+          required: false
+          description: 경도
+          schema:
+            type: number
+            example: 126.9780
+        - in: query
+          name: district
+          required: false
+          description: 행정구역명
+          schema:
+            type: string
+            example: "강남구"
+      responses:
+        '200':
+          description: 성공적으로 대기질 정보를 조회함
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AirQualityData'
+        '400':
+          description: 잘못된 요청
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /traffic:
+    get:
+      summary: 교통 정보 조회
+      description: 출발지와 도착지 간의 교통 정보를 조회
+      parameters:
+        - in: query
+          name: from
+          required: true
+          description: 출발지 좌표 (위도,경도)
+          schema:
+            type: string
+            pattern: '^-?\d+\.\d+,-?\d+\.\d+$'
+            example: "37.5665,126.9780"
+        - in: query
+          name: to
+          required: true
+          description: 도착지 좌표 (위도,경도)
+          schema:
+            type: string
+            pattern: '^-?\d+\.\d+,-?\d+\.\d+$'
+            example: "37.5172,127.0473"
+        - in: query
+          name: time
+          required: false
+          description: 출발 예정 시간 (ISO8601 형식)
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: 성공적으로 교통 정보를 조회함
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrafficData'
+        '400':
+          description: 잘못된 요청
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /healthz:
+    get:
+      summary: 헬스체크
+      description: 서버 상태를 확인
+      responses:
+        '200':
+          description: 서버가 정상 작동 중
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheck'
+components:
+  schemas:
+    Briefing:
+      type: object
+      properties:
+        summary:
+          type: string
+          description: 통합 요약 정보
+          example: "High 24°C · Air GOOD · ETA 43 min"
+        notices:
+          type: array
+          items:
+            type: string
+          description: 알림 메시지들
+          example: ["weather_missing_api_key", "air_missing_api_key"]
+        weather:
+          type: object
+          properties:
+            source:
+              type: string
+              example: "kma"
+            source_status:
+              type: string
+              enum: [ok, missing_api_key, upstream_error, timeout, bad_response]
+            updated_at:
+              type: string
+              format: date-time
+            sky:
+              type: string
+              enum: [SUNNY, CLOUDY, RAINY]
+            tmin_c:
+              type: number
+            tmax_c:
+              type: number
+            note:
+              type: string
+        air:
+          type: object
+          properties:
+            source:
+              type: string
+              example: "airkorea"
+            source_status:
+              type: string
+              enum: [ok, missing_api_key, upstream_error, timeout, bad_response]
+            updated_at:
+              type: string
+              format: date-time
+            pm10:
+              type: number
+            pm25:
+              type: number
+            grade:
+              type: string
+              enum: [GOOD, MODERATE, BAD, VERY_BAD]
+            note:
+              type: string
+        traffic:
+          type: object
+          properties:
+            source:
+              type: string
+              example: "expressway"
+            source_status:
+              type: string
+              enum: [ok, missing_api_key, upstream_error, timeout, bad_response]
+            updated_at:
+              type: string
+              format: date-time
+            eta_minutes:
+              type: number
+            congestion_level:
+              type: string
+              enum: [LOW, MID, HIGH]
+            note:
+              type: string
+    WeatherData:
+      type: object
+      properties:
+        temp:
+          type: number
+          description: 기온 (섭씨)
+          example: 20
+        feels_like:
+          type: number
+          description: 체감온도 (섭씨)
+          example: 18
+        condition:
+          type: string
+          description: 날씨 상태
+          enum: [clear, cloudy, rain, snow, storm, fog]
+          example: "clear"
+        pop:
+          type: number
+          description: 강수확률 (0-1)
+          minimum: 0
+          maximum: 1
+          example: 0.1
+        hourly:
+          type: array
+          description: 시간별 예보
+          items:
+            type: object
+            properties:
+              time:
+                type: string
+                format: date-time
+                example: "2024-01-15T10:00:00Z"
+              temp:
+                type: number
+                example: 22
+              pop:
+                type: number
+                minimum: 0
+                maximum: 1
+                example: 0.2
+    AirQualityData:
+      type: object
+      properties:
+        pm10:
+          type: number
+          description: PM10 농도 (㎍/㎥)
+          example: 25
+        pm25:
+          type: number
+          description: PM2.5 농도 (㎍/㎥)
+          example: 12
+        grade:
+          type: string
+          description: 대기질 등급
+          enum: [good, normal, bad, verybad]
+          example: "good"
+        advice:
+          type: string
+          description: 대기질 관련 조언
+          example: "공기질이 좋습니다. 야외 활동에 적합합니다."
+    TrafficData:
+      type: object
+      properties:
+        eta:
+          type: object
+          description: 교통수단별 예상 소요시간 (분)
+          properties:
+            car:
+              type: integer
+              example: 25
+            metro:
+              type: integer
+              example: 20
+            bike:
+              type: integer
+              example: 35
+        recommend:
+          type: string
+          description: 추천 교통수단
+          enum: [car, metro, bike]
+          example: "metro"
+        notes:
+          type: string
+          description: 교통 관련 주의사항
+          example: "심한 교통 체증이 예상됩니다"
+    HealthCheck:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          description: 서버 상태
+          example: true
+        time:
+          type: string
+          format: date-time
+          description: 현재 시간
+          example: "2024-01-15T09:00:00Z"
+        uptime:
+          type: number
+          description: 서버 가동 시간 (초)
+          example: 3600
+        memory:
+          type: object
+          description: 메모리 사용량
+          properties:
+            rss:
+              type: integer
+              example: 50000000
+            heapTotal:
+              type: integer
+              example: 20000000
+            heapUsed:
+              type: integer
+              example: 15000000
+        version:
+          type: string
+          example: "1.0.0"
+        environment:
+          type: string
+          example: "development"
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: 에러 메시지
+          example: "Invalid parameters"
+        code:
+          type: string
+          description: 에러 코드
+          example: "VALIDATION_ERROR"
+        upstream:
+          type: string
+          description: 실패한 외부 서비스
+          example: "kma"
+        timestamp:
+          type: string
+          format: date-time
+          description: 에러 발생 시간
+          example: "2024-01-15T09:00:00Z"
+        requestId:
+          type: string
+          description: 요청 ID
+          example: "req-1234567890-abcdef"
