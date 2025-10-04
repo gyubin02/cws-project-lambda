@@ -28,6 +28,10 @@ export type WeatherBrief = {
   hourly?: WeatherHourly[];
   tmin_c?: number;
   tmax_c?: number;
+  humidity?: number;
+  wind_mps?: number;
+  wind_degree?: number;
+  precip_mm?: number;
   notes?: string[];
 };
 
@@ -43,6 +47,10 @@ export type AirBrief = {
   advice?: string;
   station_name?: string;
   district?: string;
+  pm10_category?: 'Good' | 'Moderate' | 'Unhealthy' | 'Very Unhealthy';
+  pm25_category?: 'Good' | 'Moderate' | 'Unhealthy' | 'Very Unhealthy';
+  aqi?: number;
+  aqi_category?: 'Good' | 'Moderate' | 'Unhealthy' | 'Very Unhealthy';
   notes?: string[];
 };
 

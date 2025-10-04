@@ -2,13 +2,13 @@
  * 날씨 라우트
  */
 
-import { Router } from 'express';
+import express from 'express';
 import { z } from 'zod';
 import { WeatherService } from '../services/weather.service';
 import { logger } from '../lib/logger';
 import { UpstreamError } from '../lib/errors';
 
-const router: Router = Router();
+const router = express.Router();
 const weatherService = new WeatherService();
 
 // 요청 스키마 검증
@@ -18,7 +18,7 @@ const WeatherQuerySchema = z.object({
   time: z.string().datetime().optional(),
 });
 
-router.get('/', async (req, res) => {
+router.get('/', async (req: any, res: any) => {
   const reqId = req.headers['x-request-id'] as string;
   
   try {

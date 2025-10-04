@@ -1,4 +1,3 @@
-import type { NextFunction, Request, Response } from 'express';
 import { ENV } from './env';
 
 const buckets = new Map<string, { count: number; resetAt: number }>();
@@ -13,7 +12,7 @@ function currentBucket(key: string, now: number) {
   return existing;
 }
 
-export function rateLimiter(req: Request, res: Response, next: NextFunction) {
+export function rateLimiter(req: any, res: any, next: any) {
   const now = Date.now();
   const key = req.ip || 'global';
   const bucket = currentBucket(key, now);

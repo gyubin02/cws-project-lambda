@@ -1,11 +1,11 @@
-import { Router } from 'express';
+import express from 'express';
 import { z } from 'zod';
 import { buildBriefing } from '../services/briefing.service';
 import type { Coordinates } from '../types';
 import { parseCoordOrGeocode, COORDINATE_REGEX, LOCATION_INPUT_MESSAGE } from '../lib/util';
 import { tmapAdapter } from '../adapters/tmap.adapter';
 
-const router: Router = Router();
+const router = express.Router();
 
 const locationSchema = z.union([
   z.string().regex(COORDINATE_REGEX, { message: LOCATION_INPUT_MESSAGE }),
@@ -22,7 +22,7 @@ const QuerySchema = z.object({
   { message: 'Provide user_id or both from/to values.' }
 );
 
-router.get('/', async (req, res) => {
+router.get('/', async (req: any, res: any) => {
   const parsed = QuerySchema.safeParse(req.query);
   if (!parsed.success) {
     return res.status(400).json({ error: 'bad_request', message: LOCATION_INPUT_MESSAGE, issues: parsed.error.issues });

@@ -2,12 +2,12 @@
  * 헬스체크 라우트
  */
 
-import { Router } from 'express';
+import express from 'express';
 import { logger } from '../lib/logger';
 
-const router: Router = Router();
+const router = express.Router();
 
-router.get('/', (req, res) => {
+router.get('/', (req: any, res: any) => {
   const reqId = req.headers['x-request-id'] as string;
   
   try {

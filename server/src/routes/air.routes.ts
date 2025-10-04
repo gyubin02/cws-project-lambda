@@ -2,13 +2,13 @@
  * 대기질 라우트
  */
 
-import { Router } from 'express';
+import express from 'express';
 import { z } from 'zod';
 import { AirService } from '../services/air.service';
 import { logger } from '../lib/logger';
 import { UpstreamError } from '../lib/errors';
 
-const router: Router = Router();
+const router = express.Router();
 const airService = new AirService();
 
 // 요청 스키마 검증
@@ -23,7 +23,7 @@ const AirQuerySchema = z.object({
   }
 );
 
-router.get('/', async (req, res) => {
+router.get('/', async (req: any, res: any) => {
   const reqId = req.headers['x-request-id'] as string;
   
   try {

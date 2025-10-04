@@ -2,46 +2,9 @@
  * 유틸리티 함수들 (지리, 시간, 단위 변환)
  */
 
-import { Coordinates, KMAGridCoordinates } from '../types';
+import { Coordinates } from '../types';
 import tollgateCatalog from '../../data/expressway_tollgates.json';
 import type { ExpresswayTollgate } from '../types';
-
-/**
- * 위도/경도를 KMA 격자 좌표로 변환
- */
-export function latLonToGrid(lat: number, lon: number): KMAGridCoordinates {
-  const RE = 6371.00877; // 지구 반경(km)
-  const GRID = 5.0; // 격자 간격(km)
-  const SLAT1 = 30.0; // 투영 위도1(degree)
-  const SLAT2 = 60.0; // 투영 위도2(degree)
-  const OLON = 126.0; // 기준점 경도(degree)
-  const OLAT = 38.0; // 기준점 위도(degree)
-  const XO = 43; // 기준점 X좌표(GRID)
-  const YO = 136; // 기준점 Y좌표(GRID)
-
-  const DEGRAD = Math.PI / 180.0;
-
-  const re = RE / GRID;
-  const slat1 = SLAT1 * DEGRAD;
-  const slat2 = SLAT2 * DEGRAD;
-  const olon = OLON * DEGRAD;
-  const olat = OLAT * DEGRAD;
-
-  let sn = Math.tan(Math.PI * 0.25 + slat2 * 0.5) / Math.tan(Math.PI * 0.25 + slat1 * 0.5);
-  sn = Math.log(Math.cos(slat1) / Math.cos(slat2)) / Math.log(sn);
-  let sf = Math.tan(Math.PI * 0.25 + slat1 * 0.5);
-  sf = (Math.pow(sf, sn) * Math.cos(slat1)) / sn;
-  let ro = Math.tan(Math.PI * 0.25 + olat * 0.5);
-  ro = (re * sf) / Math.pow(ro, sn);
-
-  const ra = Math.tan(Math.PI * 0.25 + lat * DEGRAD * 0.5);
-  const theta = lon * DEGRAD - olon;
-
-  const x = Math.floor(ra * Math.sin(theta) * ro + XO + 0.5);
-  const y = Math.floor(ro * ra * Math.cos(theta) + YO + 0.5);
-
-  return { nx: x, ny: y };
-}
 
 /**
  * 두 좌표 간의 거리 계산 (Haversine 공식)
@@ -246,9 +209,9 @@ export function mapWeatherCondition(pty: number, sky: number): string {
   if (pty > 0) {
     switch (pty) {
       case 1: return 'rain';
-      case 2: return 'rain';
+      case 2: return 'sleet';
       case 3: return 'snow';
-      case 4: return 'storm';
+      case 4: return 'shower';
       default: return 'rain';
     }
   }
@@ -257,7 +220,7 @@ export function mapWeatherCondition(pty: number, sky: number): string {
   switch (sky) {
     case 1: return 'clear';
     case 3: return 'cloudy';
-    case 4: return 'cloudy';
+    case 4: return 'overcast';
     default: return 'clear';
   }
 }

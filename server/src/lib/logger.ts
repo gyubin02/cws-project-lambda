@@ -3,7 +3,6 @@
  */
 
 import pino from 'pino';
-import { Request, Response } from 'express';
 
 const isDevelopment = process.env['NODE_ENV'] === 'development';
 
@@ -21,7 +20,7 @@ export const logger = pino({
   }),
 });
 
-export const requestLogger = (req: Request, res: Response, next: () => void) => {
+export const requestLogger = (req: any, res: any, next: () => void) => {
   const start = Date.now();
   const reqId = req.headers['x-request-id'] as string || `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   

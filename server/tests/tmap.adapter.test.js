@@ -15,6 +15,8 @@ test('TMAP car fixture parses into TrafficBrief', async () => {
   assert.ok(Math.abs((brief.distance_km ?? 0) - 21.3) < 0.2);
   assert.equal(brief.steps?.length, 3);
   assert.equal(brief.congestion_level, 'MID');
+  assert.equal(brief.source_status, 'missing_api_key');
+  assert.ok(brief.notes?.some((note) => note.includes('fixture')));
 });
 
 test('TMAP transit fixture includes fare and transfers', async () => {

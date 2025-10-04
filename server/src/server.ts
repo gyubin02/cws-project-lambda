@@ -11,15 +11,16 @@ const NODE_ENV = ENV.NODE_ENV;
 
 // 필수 환경변수 검증
 const requiredEnvVars = [
-  'KMA_SERVICE_KEY',
-  'AIRKOREA_SERVICE_KEY',
+  'TMAP_API_KEY',
   'EXPRESSWAY_API_KEY',
+  'KMA_API_KEY',
+  'AIRKOREA_API_KEY',
 ];
 
 const missingEnvVars = requiredEnvVars.filter((envVar) => !process.env[envVar]);
 
 if (missingEnvVars.length > 0) {
-  if (NODE_ENV === 'production' && ENV.MOCK !== 1) {
+  if (NODE_ENV === 'production' && !ENV.MOCK) {
     logger.error({ missingEnvVars }, 'Missing required environment variables');
     process.exit(1);
   } else {

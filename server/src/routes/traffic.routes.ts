@@ -2,7 +2,7 @@
  * 교통 라우트
  */
 
-import { Router } from 'express';
+import express from 'express';
 import { z } from 'zod';
 import { trafficService } from '../services/traffic.service';
 import { logger } from '../lib/logger';
@@ -10,7 +10,7 @@ import type { Coordinates } from '../types';
 import { parseCoordOrGeocode, COORDINATE_REGEX, LOCATION_INPUT_MESSAGE } from '../lib/util';
 import { tmapAdapter } from '../adapters/tmap.adapter';
 
-const router: Router = Router();
+const router = express.Router();
 
 const locationSchema = z.union([
   z.string().regex(COORDINATE_REGEX, { message: LOCATION_INPUT_MESSAGE }),
@@ -25,7 +25,7 @@ const CityQuerySchema = z.object({
 
 const ExpresswayQuerySchema = CityQuerySchema;
 
-router.get('/car', async (req, res) => {
+router.get('/car', async (req: any, res: any) => {
   const parsed = CityQuerySchema.safeParse(req.query);
   if (!parsed.success) {
     return res.status(400).json({ error: 'bad_request', message: LOCATION_INPUT_MESSAGE, issues: parsed.error.issues });
@@ -56,7 +56,7 @@ router.get('/car', async (req, res) => {
   return res.json(cityTraffic.car);
 });
 
-router.get('/transit', async (req, res) => {
+router.get('/transit', async (req: any, res: any) => {
   const parsed = CityQuerySchema.safeParse(req.query);
   if (!parsed.success) {
     return res.status(400).json({ error: 'bad_request', message: LOCATION_INPUT_MESSAGE, issues: parsed.error.issues });
@@ -87,7 +87,7 @@ router.get('/transit', async (req, res) => {
   return res.json(cityTraffic.transit);
 });
 
-router.get('/expressway', async (req, res) => {
+router.get('/expressway', async (req: any, res: any) => {
   const parsed = ExpresswayQuerySchema.safeParse(req.query);
   if (!parsed.success) {
     return res.status(400).json({ error: 'bad_request', message: LOCATION_INPUT_MESSAGE, issues: parsed.error.issues });
