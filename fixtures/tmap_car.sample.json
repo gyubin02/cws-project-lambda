@@ -1,0 +1,32 @@
+{
+  "meta": {
+    "doc": "TMAP car routing (sample)",
+    "note": "Replace with real schema after docs."
+  },
+  "routes": [
+    {
+      "summary": {
+        "duration": 2820,
+        "distance": 21345
+      },
+      "sections": [
+        {
+          "type": "drive",
+          "name": "Gangbyeonbuk-ro",
+          "duration": 1200
+        },
+        {
+          "type": "drive",
+          "name": "Olympic-daero",
+          "duration": 900
+        },
+        {
+          "type": "drive",
+          "name": "Local roads",
+          "duration": 720
+        }
+      ],
+      "congestion": "MID"
+    }
+  ]
+}

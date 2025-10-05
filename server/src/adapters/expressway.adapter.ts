@@ -1,88 +1,196 @@
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { cached } from '../lib/cache';
+import { ENV } from '../lib/env';
+import { liveOrMock } from '../lib/liveOrMock';
 import { http } from '../lib/http';
-import { ENV, isMock } from '../lib/env';
 import { UpstreamError } from '../lib/errors';
-import { ExpresswayData } from '../types';
+import type { TrafficBrief } from '../types';
 
-export type TrafficBrief = {
-  source: 'expressway';
-  source_status: 'ok'|'missing_api_key'|'upstream_error'|'timeout'|'bad_response';
-  updated_at: string;
-  eta_minutes?: number;
-  congestion_level?: 'LOW'|'MID'|'HIGH';
+const FIXTURE_PATH = path.resolve(__dirname, '../../../fixtures/expressway_tollgate.sample.json');
+
+const toNumber = (value: unknown): number | undefined => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    const parsed = Number(trimmed);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  return undefined;
+};
+
+const composeObservedAt = (date?: string, hour?: string, minute?: string): string | undefined => {
+  if (!date || date.length < 8) return undefined;
+  const y = date.substring(0, 4);
+  const m = date.substring(4, 6);
+  const d = date.substring(6, 8);
+  const hh = (hour ?? '00').padStart(2, '0');
+  const mm = (minute ?? '00').padStart(2, '0');
+  const iso = `${y}-${m}-${d}T${hh}:${mm}:00+09:00`;
+  return new Date(iso).toISOString();
+};
+
+const parseCongestion = (value: unknown): TrafficBrief['congestion_level'] | undefined => {
+  if (typeof value === 'string') {
+    const upper = value.toUpperCase();
+    if (upper.includes('SLOW')) return 'MID';
+    if (upper.includes('CONGEST') || upper.includes('BLOCK')) return 'HIGH';
+    if (upper.includes('LOW') || upper.includes('FREE')) return 'LOW';
+    if (upper.includes('MID')) return 'MID';
+    if (upper.includes('HIGH')) return 'HIGH';
+  } else if (typeof value === 'number') {
+    if (value <= 1) return 'LOW';
+    if (value === 2) return 'MID';
+    if (value >= 3) return 'HIGH';
+  }
+  return undefined;
+};
+
+const deriveCongestionFromEta = (minutes: number | undefined): TrafficBrief['congestion_level'] | undefined => {
+  if (typeof minutes !== 'number' || Number.isNaN(minutes)) {
+    return undefined;
+  }
+  if (minutes <= 20) return 'LOW';
+  if (minutes <= 40) return 'MID';
+  return 'HIGH';
+};
+
+type ExpresswayRecord = {
+  timeAvg?: string | number;
+  travelTimeSec?: number;
+  travelTime?: string | number;
+  stndDate?: string;
+  stndHour?: string;
+  stndMin?: string;
+  regDate?: string;
+  trafficStatus?: string;
+  trafficIdx?: string | number;
+};
+
+type MapOptions = {
+  status: TrafficBrief['source_status'];
   note?: string;
 };
 
+const extractRecords = (payload: any): ExpresswayRecord[] => {
+  if (Array.isArray(payload?.response?.body?.items?.item)) {
+    return payload.response.body.items.item as ExpresswayRecord[];
+  }
+  if (Array.isArray(payload?.list)) {
+    return payload.list as ExpresswayRecord[];
+  }
+  if (Array.isArray(payload?.realUnitTrtm)) {
+    const first = payload.realUnitTrtm[0];
+    if (Array.isArray(first?.list)) {
+      return first.list as ExpresswayRecord[];
+    }
+  }
+  if (Array.isArray(payload?.items)) {
+    return payload.items as ExpresswayRecord[];
+  }
+  return [];
+};
+
+const pickLatestRecord = (records: ExpresswayRecord[]): ExpresswayRecord | undefined => {
+  if (!records.length) return undefined;
+  return records.reduce((latest, current) => {
+    const currentStamp = `${current.stndDate ?? ''}${current.stndHour ?? ''}${current.stndMin ?? ''}${current.regDate ?? ''}`;
+    const latestStamp = `${latest?.stndDate ?? ''}${latest?.stndHour ?? ''}${latest?.stndMin ?? ''}${latest?.regDate ?? ''}`;
+    return currentStamp > latestStamp ? current : latest;
+  }, records[0]);
+};
+
+const mapExpressway = (payload: any, opts: MapOptions): TrafficBrief => {
+  const records = extractRecords(payload);
+  const latest = pickLatestRecord(records);
+
+  if (!latest) {
+    throw new UpstreamError('Expressway response missing records', 'bad_response');
+  }
+
+  const etaMinutes = (() => {
+    const travelSeconds = toNumber(latest.travelTimeSec);
+    if (travelSeconds != null) return Math.ceil(travelSeconds / 60);
+    const travelMinutes = toNumber(latest.timeAvg ?? latest.travelTime);
+    if (travelMinutes != null) return Math.ceil(travelMinutes);
+    return undefined;
+  })();
+
+  if (etaMinutes == null) {
+    throw new UpstreamError('Expressway response missing ETA', 'bad_response');
+  }
+
+  const observedAt = composeObservedAt(latest.stndDate ?? latest.regDate, latest.stndHour, latest.stndMin);
+
+  const notes: string[] = [];
+  if (opts.note) notes.push(opts.note);
+  if (observedAt) notes.push(`Latest observation at ${observedAt}`);
+
+  const brief: TrafficBrief = {
+    source: 'expressway',
+    source_status: opts.status,
+    updated_at: new Date().toISOString(),
+    mode: 'car',
+    eta_minutes: etaMinutes,
+  };
+
+  const congestion =
+    parseCongestion(latest.trafficStatus ?? latest.trafficIdx) ?? deriveCongestionFromEta(etaMinutes);
+  if (congestion) {
+    brief.congestion_level = congestion;
+  }
+
+  if (notes.length) {
+    brief.notes = notes;
+  }
+
+  return brief;
+};
+
+const timeBucket10m = (when?: Date): string => {
+  const base = when ? when.getTime() : Date.now();
+  const bucket = Math.floor(base / (10 * 60_000));
+  return bucket.toString();
+};
+
 export class ExpresswayAdapter {
-  async getTrafficData(_fromLat: number, _fromLon: number, _toLat: number, _toLon: number, _time?: Date): Promise<ExpresswayData> {
-    if (isMock) {
-      return {
-        eta: {
-          car: 45,
-          metro: 32,
-          bike: 55,
-        },
-        recommend: 'metro',
-        notes: '도심 정체가 예상됩니다. 지하철 이용 시 시청역에서 6분 도보 환승이 필요합니다.',
-      };
-    }
+  async routeExpresswayByTollgate(
+    fromToll: string,
+    toToll: string,
+    when?: Date
+  ): Promise<TrafficBrief> {
+    const cacheKey = `expressway:${fromToll}:${toToll}:${timeBucket10m(when)}`;
+    const hasKeys = Boolean(ENV.EXPRESSWAY_API_KEY);
 
-    if (!ENV.EXPRESSWAY_API_KEY) {
-      throw new UpstreamError('Expressway API key missing', 'missing_api_key');
-    }
+    return cached(cacheKey, async () =>
+      liveOrMock({
+        adapter: 'EXPRESSWAY',
+        hasKeys,
+        live: async () => {
+          const response = await http.get(`${ENV.EXPRESSWAY_BASE_URL}/realUnitTrtm`, {
+            params: {
+              key: ENV.EXPRESSWAY_API_KEY,
+              type: 'json',
+              iStartUnitCode: fromToll,
+              iEndUnitCode: toToll,
+            },
+          });
 
-    try {
-      // TODO: choose "tollgate-to-tollgate travel time" endpoint and/or "realtime flow" endpoint
-      const url = 'https://data.ex.co.kr/openapi/traffic/tollgateTravelTime';
-      const params = {
-        serviceKey: ENV.EXPRESSWAY_API_KEY,
-        pageNo: 1, numOfRows: 10, type: 'json',
-        startUnitName: 'START', endUnitName: 'END', // TODO: convert coordinates → section name
-      };
-      await http.get(url, { params });
-      // TODO: parse ETA (minutes) and map congestion → LOW/MID/HIGH
-      return {
-        eta: {
-          car: 45,
-          metro: 32,
-          bike: 55,
+          return mapExpressway(response.data, { status: 'ok' });
         },
-        recommend: 'metro',
-        notes: '도심 정체가 예상됩니다. 지하철 이용 시 시청역에서 6분 도보 환승이 필요합니다.',
-      };
-    } catch (err: any) {
-      const code = err.code === 'ECONNABORTED' ? 'timeout' : 'upstream_error';
-      throw new UpstreamError(`expressway failed: ${err.message}`, code, err.response?.status);
-    }
+        mock: async () => {
+          const data = await fs.readFile(FIXTURE_PATH, 'utf8');
+          const parsed = JSON.parse(data);
+          const status = hasKeys ? 'upstream_error' : 'missing_api_key';
+          const note = hasKeys
+            ? 'Expressway live request failed — returning fixture data.'
+            : 'Expressway API key missing — returning fixture data.';
+          return mapExpressway(parsed, { status, note });
+        },
+      })
+    );
   }
 }
 
-// Keep the function export for backward compatibility
-export async function fetchTraffic(from: string, to: string): Promise<TrafficBrief> {
-  if (isMock) {
-    return { source: 'expressway', source_status: 'ok', updated_at: new Date().toISOString(),
-      eta_minutes: 43, congestion_level: 'MID', note: 'mock' };
-  }
-  if (!ENV.EXPRESSWAY_API_KEY) {
-    return { source: 'expressway', source_status: 'missing_api_key', updated_at: new Date().toISOString(),
-      note: 'EXPRESSWAY_API_KEY is missing. Provide a key to enable live data.' };
-  }
-
-  try {
-    // TODO: choose "tollgate-to-tollgate travel time" endpoint and/or "realtime flow" endpoint
-    const url = 'https://data.ex.co.kr/openapi/traffic/tollgateTravelTime';
-    const params = {
-      serviceKey: ENV.EXPRESSWAY_API_KEY,
-      pageNo: 1, numOfRows: 10, type: 'json',
-      startUnitName: from, endUnitName: to,
-    };
-    await http.get(url, { params });
-    // TODO: parse ETA (minutes) and map congestion → LOW/MID/HIGH
-    return {
-      source: 'expressway', source_status: 'ok', updated_at: new Date().toISOString(),
-      eta_minutes: 43, congestion_level: 'MID'
-    };
-  } catch (err: any) {
-    const code = err.code === 'ECONNABORTED' ? 'timeout' : 'upstream_error';
-    throw new UpstreamError(`expressway failed: ${err.message}`, code, err.response?.status);
-  }
-}
+export const expresswayAdapter = new ExpresswayAdapter();

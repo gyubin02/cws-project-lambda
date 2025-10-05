@@ -2,6 +2,8 @@
  * KMA (기상청) API 응답 타입들
  */
 
+import type { WeatherBrief } from './briefing';
+
 export type KMAUltraSrtNcstResponse = {
   response: {
     header: {
@@ -72,18 +74,7 @@ export type KMAVilageFcstResponse = {
   };
 };
 
-export type KMAWeatherData = {
-  temp: number;
-  feels_like: number;
-  condition: string;
-  pop: number;
-  hourly: Array<{
-    time: string;
-    temp: number;
-    pop: number;
-    condition: string;
-  }>;
-};
+export type KMAWeatherData = WeatherBrief;
 
 export type KMAGridCoordinates = {
   nx: number;

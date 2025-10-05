@@ -2,45 +2,9 @@
  * 유틸리티 함수들 (지리, 시간, 단위 변환)
  */
 
-import { Coordinates, KMAGridCoordinates } from '../types';
-
-/**
- * 위도/경도를 KMA 격자 좌표로 변환
- */
-export function latLonToGrid(lat: number, lon: number): KMAGridCoordinates {
-  const RE = 6371.00877; // 지구 반경(km)
-  const GRID = 5.0; // 격자 간격(km)
-  const SLAT1 = 30.0; // 투영 위도1(degree)
-  const SLAT2 = 60.0; // 투영 위도2(degree)
-  const OLON = 126.0; // 기준점 경도(degree)
-  const OLAT = 38.0; // 기준점 위도(degree)
-  const XO = 43; // 기준점 X좌표(GRID)
-  const YO = 136; // 기준점 Y좌표(GRID)
-
-  const DEGRAD = Math.PI / 180.0;
-  const RADDEG = 180.0 / Math.PI;
-
-  const re = RE / GRID;
-  const slat1 = SLAT1 * DEGRAD;
-  const slat2 = SLAT2 * DEGRAD;
-  const olon = OLON * DEGRAD;
-  const olat = OLAT * DEGRAD;
-
-  let sn = Math.tan(Math.PI * 0.25 + slat2 * 0.5) / Math.tan(Math.PI * 0.25 + slat1 * 0.5);
-  sn = Math.log(Math.cos(slat1) / Math.cos(slat2)) / Math.log(sn);
-  let sf = Math.tan(Math.PI * 0.25 + slat1 * 0.5);
-  sf = (Math.pow(sf, sn) * Math.cos(slat1)) / sn;
-  let ro = Math.tan(Math.PI * 0.25 + olat * 0.5);
-  ro = (re * sf) / Math.pow(ro, sn);
-
-  const ra = Math.tan(Math.PI * 0.25 + lat * DEGRAD * 0.5);
-  const theta = lon * DEGRAD - olon;
-
-  const x = Math.floor(ra * Math.sin(theta) * ro + XO + 0.5);
-  const y = Math.floor(ro * ra * Math.cos(theta) + YO + 0.5);
-
-  return { nx: x, ny: y };
-}
+import { Coordinates } from '../types';
+import tollgateCatalog from '../../data/expressway_tollgates.json';
+import type { ExpresswayTollgate } from '../types';
 
 /**
  * 두 좌표 간의 거리 계산 (Haversine 공식)
@@ -57,10 +21,33 @@ export function calculateDistance(from: Coordinates, to: Coordinates): number {
   return R * c;
 }
 
+const tollgates: ExpresswayTollgate[] = tollgateCatalog as ExpresswayTollgate[];
+
+export function nearestTollgate(lat: number, lon: number): ExpresswayTollgate {
+  if (tollgates.length === 0) {
+    throw new Error('expressway tollgate catalog is empty');
+  }
+
+  let closest = tollgates[0]!;
+  let minDistance = Number.POSITIVE_INFINITY;
+  const origin: Coordinates = { lat, lon };
+
+  for (const gate of tollgates) {
+    const candidate: Coordinates = { lat: gate.lat, lon: gate.lon };
+    const dist = calculateDistance(origin, candidate);
+    if (dist < minDistance) {
+      minDistance = dist;
+      closest = gate;
+    }
+  }
+
+  return closest;
+}
+
 /**
  * 체감온도 계산 (간단한 공식)
  */
-export function calculateFeelsLike(temp: number, humidity: number, windSpeed: number): number {
+export function calculateFeelsLike(temp: number, humidity: number, _windSpeed: number): number {
   // Heat Index 공식 (화씨 기준)
   const tempF = (temp * 9 / 5) + 32;
   const hi = -42.379 + 
@@ -126,12 +113,47 @@ export function getNearestBaseTime(targetTime?: Date): { baseDate: string; baseT
 /**
  * 좌표 문자열 파싱 ("lat,lon" -> {lat, lon})
  */
+export const COORDINATE_REGEX = /^-?\d+\.\d+,-?\d+\.\d+$/;
+
 export function parseCoordinates(coordStr: string): Coordinates {
-  const [lat, lon] = coordStr.split(',').map(Number);
-  if (isNaN(lat) || isNaN(lon)) {
-    throw new Error(`Invalid coordinates: ${coordStr}`);
+  const trimmed = coordStr.trim();
+  const [latStr, lonStr] = trimmed.split(',');
+  if (latStr === undefined || lonStr === undefined) {
+    throw new Error(`Invalid coordinates: ${trimmed}`);
+  }
+  const lat = Number(latStr);
+  const lon = Number(lonStr);
+  if (Number.isNaN(lat) || Number.isNaN(lon)) {
+    throw new Error(`Invalid coordinates: ${trimmed}`);
   }
   return { lat, lon };
+}
+
+export const LOCATION_INPUT_MESSAGE = "from/to must be 'lat,lon' or a place name (e.g., 강남역).";
+
+export async function parseCoordOrGeocode(
+  value: string,
+  geocodeFn: (query: string) => Promise<Coordinates>
+): Promise<Coordinates> {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error(LOCATION_INPUT_MESSAGE);
+  }
+
+  if (COORDINATE_REGEX.test(trimmed)) {
+    return parseCoordinates(trimmed);
+  }
+
+  try {
+    const coordinates = await geocodeFn(trimmed);
+    if (typeof coordinates?.lat === 'number' && typeof coordinates?.lon === 'number') {
+      return coordinates as Coordinates;
+    }
+  } catch (error) {
+    // ignore and fall through to unified message
+  }
+
+  throw new Error(LOCATION_INPUT_MESSAGE);
 }
 
 /**
@@ -187,9 +209,9 @@ export function mapWeatherCondition(pty: number, sky: number): string {
   if (pty > 0) {
     switch (pty) {
       case 1: return 'rain';
-      case 2: return 'rain';
+      case 2: return 'sleet';
       case 3: return 'snow';
-      case 4: return 'storm';
+      case 4: return 'shower';
       default: return 'rain';
     }
   }
@@ -198,7 +220,7 @@ export function mapWeatherCondition(pty: number, sky: number): string {
   switch (sky) {
     case 1: return 'clear';
     case 3: return 'cloudy';
-    case 4: return 'cloudy';
+    case 4: return 'overcast';
     default: return 'clear';
   }
 }

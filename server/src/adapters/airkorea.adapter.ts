@@ -1,86 +1,113 @@
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { ENV } from '../lib/env';
+import { liveOrMock } from '../lib/liveOrMock';
 import { http } from '../lib/http';
-import { ENV, isMock } from '../lib/env';
-import { UpstreamError } from '../lib/errors';
-import { AirKoreaData } from '../types';
+import { calculateAirGrade, getAirQualityAdvice } from '../lib/util';
+import { normalizeAirPayload, pickNearestStation, wgs84ToTM } from '../lib/airkorea.util';
+import type { AirBrief } from '../types';
 
-export type AirQuality = {
-  source: 'airkorea';
-  source_status: 'ok'|'missing_api_key'|'upstream_error'|'timeout'|'bad_response';
-  updated_at: string;
-  pm10?: number; pm25?: number;
-  grade?: 'GOOD'|'MODERATE'|'BAD'|'VERY_BAD';
-  note?: string;
+const FIXTURE_PATH = path.resolve(__dirname, '../../../fixtures/airkorea_realtime.sample.json');
+
+const readFixture = async <T>(filePath: string): Promise<T> => {
+  const raw = await fs.readFile(filePath, 'utf8');
+  return JSON.parse(raw) as T;
+};
+
+const mapToBrief = (
+  normalized: ReturnType<typeof normalizeAirPayload>,
+  status: AirBrief['source_status'],
+  district?: string,
+  note?: string
+): AirBrief => {
+  const pm10 = normalized.pm10;
+  const pm25 = normalized.pm25;
+  const grade = calculateAirGrade(pm10 ?? 0, pm25 ?? 0);
+  const notes = [...normalized.notes];
+  if (note) notes.push(note);
+
+  const brief: AirBrief = {
+    source: 'airkorea',
+    source_status: status,
+    updated_at: normalized.observedAt ?? new Date().toISOString(),
+    grade,
+    advice: getAirQualityAdvice(grade),
+  };
+
+  if (pm10 != null) {
+    brief.pm10 = pm10;
+  }
+  if (pm25 != null) {
+    brief.pm25 = pm25;
+  }
+  if (normalized.stationName) {
+    brief.station_name = normalized.stationName;
+  }
+  if (district) {
+    brief.district = district;
+  }
+  if (normalized.pm10Category) {
+    brief.pm10_category = normalized.pm10Category;
+  }
+  if (normalized.pm25Category) {
+    brief.pm25_category = normalized.pm25Category;
+  }
+  if (normalized.aqi != null) {
+    brief.aqi = normalized.aqi;
+  }
+  if (normalized.aqiCategory) {
+    brief.aqi_category = normalized.aqiCategory;
+  }
+  if (notes.length) {
+    brief.notes = notes;
+  }
+
+  return brief;
 };
 
 export class AirKoreaAdapter {
-  async getAirQualityData(_district: string | undefined, _lat: number, _lon: number): Promise<AirKoreaData> {
-    if (isMock) {
-      return {
-        pm10: 22,
-        pm25: 12,
-        grade: 'good',
-        advice: '공기질이 매우 좋습니다. 야외 활동하기 완벽한 날입니다.',
-      };
-    }
+  async getAirQualityData(district: string | undefined, lat: number, lon: number): Promise<AirBrief> {
+    const hasKeys = Boolean(ENV.AIRKOREA_API_KEY);
 
-    if (!ENV.AIRKOREA_SERVICE_KEY) {
-      throw new UpstreamError('AirKorea API key missing', 'missing_api_key');
-    }
+    return liveOrMock({
+      adapter: 'AIRKOREA',
+      hasKeys,
+      live: async () => {
+        const { tmX, tmY } = wgs84ToTM(lat, lon);
+        const nearby = await http.get(`${ENV.AIRKOREA_BASE_URL}/getNearbyMsrstnList`, {
+          params: {
+            serviceKey: ENV.AIRKOREA_API_KEY,
+            tmX,
+            tmY,
+            returnType: 'json',
+          },
+        });
 
-    try {
-      // TODO (simple): getCtprvnRltmMesureDnsty?sidoName=서울
-      // TODO (accurate): station lookup (getNearbyMsrstnList) → getMsrstnAcctoRltmMesureDnsty
-      const url = 'http://apis.data.go.kr/B552584/ArpltnInforInqireSvc/getCtprvnRltmMesureDnsty';
-      const params = {
-        serviceKey: ENV.AIRKOREA_SERVICE_KEY,
-        returnType: 'json', pageNo: 1, numOfRows: 100,
-        sidoName: '서울',
-      };
-      await http.get(url, { params });
-      // TODO: parse PM10/PM2.5 and compute grade threshold
-      return {
-        pm10: 22,
-        pm25: 12,
-        grade: 'good',
-        advice: '공기질이 매우 좋습니다. 야외 활동하기 완벽한 날입니다.',
-      };
-    } catch (err: any) {
-      const code = err.code === 'ECONNABORTED' ? 'timeout' : 'upstream_error';
-      throw new UpstreamError(`airkorea failed: ${err.message}`, code, err.response?.status);
-    }
+        const stationName = pickNearestStation(nearby.data);
+        const realtime = await http.get(`${ENV.AIRKOREA_BASE_URL}/getMsrstnAcctoRltmMesureDnsty`, {
+          params: {
+            serviceKey: ENV.AIRKOREA_API_KEY,
+            stationName,
+            dataTerm: 'DAILY',
+            numOfRows: 1,
+            returnType: 'json',
+          },
+        });
+
+        const normalized = normalizeAirPayload(realtime.data);
+        return mapToBrief(normalized, 'ok', district);
+      },
+      mock: async () => {
+        const payload = await readFixture(FIXTURE_PATH);
+        const normalized = normalizeAirPayload(payload);
+        const status = hasKeys ? 'upstream_error' : 'missing_api_key';
+        const note = hasKeys
+          ? 'AirKorea live request failed — returning fixture data.'
+          : 'AirKorea API key missing — returning fixture data.';
+        return mapToBrief(normalized, status, district, note);
+      },
+    });
   }
 }
 
-// Keep the function export for backward compatibility
-export async function fetchAirQuality(_lat: number, _lon: number): Promise<AirQuality> {
-  if (isMock) {
-    return { source: 'airkorea', source_status: 'ok', updated_at: new Date().toISOString(),
-      pm10: 22, pm25: 12, grade: 'GOOD', note: 'mock' };
-  }
-  if (!ENV.AIRKOREA_SERVICE_KEY) {
-    return { source: 'airkorea', source_status: 'missing_api_key', updated_at: new Date().toISOString(),
-      note: 'AIRKOREA_SERVICE_KEY is missing. Provide a key to enable live data.' };
-  }
-
-  try {
-    // TODO (simple): getCtprvnRltmMesureDnsty?sidoName=서울
-    // TODO (accurate): station lookup (getNearbyMsrstnList) → getMsrstnAcctoRltmMesureDnsty
-    const url = 'http://apis.data.go.kr/B552584/ArpltnInforInqireSvc/getCtprvnRltmMesureDnsty';
-    const params = {
-      serviceKey: ENV.AIRKOREA_SERVICE_KEY,
-      returnType: 'json', pageNo: 1, numOfRows: 100,
-      sidoName: '서울',
-    };
-    await http.get(url, { params });
-    // TODO: parse PM10/PM2.5 and compute grade threshold
-    return {
-      source: 'airkorea',
-      source_status: 'ok',
-      updated_at: new Date().toISOString(),
-      pm10: 22, pm25: 12, grade: 'GOOD',
-    };
-  } catch (err: any) {
-    const code = err.code === 'ECONNABORTED' ? 'timeout' : 'upstream_error';
-    throw new UpstreamError(`airkorea failed: ${err.message}`, code, err.response?.status);
-  }
-}
+export const airKoreaAdapter = new AirKoreaAdapter();

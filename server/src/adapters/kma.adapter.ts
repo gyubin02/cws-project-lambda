@@ -1,103 +1,148 @@
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { ENV } from '../lib/env';
+import { liveOrMock } from '../lib/liveOrMock';
 import { http } from '../lib/http';
-import { ENV, isMock } from '../lib/env';
-import { UpstreamError } from '../lib/errors';
-import { KMAWeatherData } from '../types';
+import { calculateFeelsLike, mapWeatherCondition, normalizePop } from '../lib/util';
+import { latLonToGrid, mergeUltraAndVillage, selectBaseSlots } from '../lib/kma.util';
+import type { WeatherBrief, WeatherHourly } from '../types';
 
-// Minimal normalized shape (extend to match your OpenAPI)
-export type KmaWeather = {
-  source: 'kma';
-  source_status: 'ok'|'missing_api_key'|'upstream_error'|'timeout'|'bad_response';
-  updated_at: string;
-  sky?: 'SUNNY'|'CLOUDY'|'RAINY';
-  tmin_c?: number;
-  tmax_c?: number;
-  note?: string;
+const FIXTURE_DIR = path.resolve(__dirname, '../../../fixtures');
+const ULTRA_FIXTURE = path.join(FIXTURE_DIR, 'kma_ultra.sample.json');
+const VILLAGE_FIXTURE = path.join(FIXTURE_DIR, 'kma_village.sample.json');
+
+type MergeResult = ReturnType<typeof mergeUltraAndVillage>;
+
+const readFixture = async <T>(filePath: string): Promise<T> => {
+  const raw = await fs.readFile(filePath, 'utf8');
+  return JSON.parse(raw) as T;
+};
+
+const buildWeatherBrief = (
+  merged: MergeResult,
+  status: WeatherBrief['source_status'],
+  note?: string
+): WeatherBrief => {
+  const now = merged.now;
+  const temperature = now.temperature;
+  const humidity = now.humidity;
+  const windSpeed = now.windSpeed;
+  const condition = mapWeatherCondition(now.precipType ?? 0, now.sky ?? 1);
+  const popNormalized = merged.pop != null ? normalizePop(merged.pop) : undefined;
+
+  let feelsLike: number | undefined;
+  if (temperature != null && humidity != null && windSpeed != null) {
+    feelsLike = Math.round(calculateFeelsLike(temperature, humidity, windSpeed) * 10) / 10;
+  }
+
+  const hourly: WeatherHourly[] = merged.hourly.slice(0, 6).map((entry) => {
+    const hourlyCondition = mapWeatherCondition(entry.precipType ?? 0, entry.sky ?? now.sky ?? 1);
+    const item: WeatherHourly = {
+      time: entry.time,
+      temp_c: entry.temperature ?? temperature ?? 0,
+      pop: entry.pop != null ? normalizePop(entry.pop) : 0,
+      condition: hourlyCondition,
+    };
+    return item;
+  });
+
+  const notes = [...merged.notes];
+  if (note) notes.push(note);
+
+  const brief: WeatherBrief = {
+    source: 'kma',
+    source_status: status,
+    updated_at: new Date().toISOString(),
+    condition,
+  };
+
+  if (temperature != null) {
+    brief.temp_c = temperature;
+  }
+  if (feelsLike != null) {
+    brief.feels_like_c = feelsLike;
+  }
+  if (popNormalized != null) {
+    brief.pop = popNormalized;
+  }
+  if (humidity != null) {
+    brief.humidity = humidity;
+  }
+  if (windSpeed != null) {
+    brief.wind_mps = windSpeed;
+  }
+  if (now.windDegree != null) {
+    brief.wind_degree = now.windDegree;
+  }
+  if (now.precipMm != null) {
+    brief.precip_mm = now.precipMm;
+  }
+  if (merged.minTemp != null) {
+    brief.tmin_c = merged.minTemp;
+  }
+  if (merged.maxTemp != null) {
+    brief.tmax_c = merged.maxTemp;
+  }
+  if (hourly.length) {
+    brief.hourly = hourly;
+  }
+  if (notes.length) {
+    brief.notes = notes;
+  }
+
+  return brief;
 };
 
 export class KMAAdapter {
-  // Example: convert lat/lon to KMA grid (stub; replace with your util if already present)
-  private toKmaGrid(_lat: number, _lon: number) {
-    // TODO: real LCC conversion → return { nx, ny }
-    return { nx: 60, ny: 127 };
-  }
+  async getWeatherData(lat: number, lon: number, when: Date = new Date()): Promise<WeatherBrief> {
+    const hasKeys = Boolean(ENV.KMA_API_KEY);
+    const { nx, ny } = latLonToGrid(lat, lon);
+    const slots = selectBaseSlots(when);
 
-  async getWeatherData(lat: number, lon: number, _time?: Date): Promise<KMAWeatherData> {
-    if (isMock) {
-      return {
-        temp: 22,
-        feels_like: 23,
-        condition: 'clear',
-        pop: 0.1,
-        hourly: [
-          { time: new Date().toISOString(), temp: 22, pop: 0.1, condition: 'clear' },
-        ],
-      };
-    }
+    return liveOrMock({
+      adapter: 'KMA',
+      hasKeys,
+      live: async () => {
+        const [ultra, village] = await Promise.all([
+          http.get(`${ENV.KMA_BASE_URL}/getUltraSrtNcst`, {
+            params: {
+              serviceKey: ENV.KMA_API_KEY,
+              dataType: 'JSON',
+              base_date: slots.ultra_base_date,
+              base_time: slots.ultra_base_time,
+              nx,
+              ny,
+            },
+          }),
+          http.get(`${ENV.KMA_BASE_URL}/getVilageFcst`, {
+            params: {
+              serviceKey: ENV.KMA_API_KEY,
+              dataType: 'JSON',
+              base_date: slots.village_base_date,
+              base_time: slots.village_base_time,
+              nx,
+              ny,
+            },
+          }),
+        ]);
 
-    if (!ENV.KMA_SERVICE_KEY) {
-      throw new UpstreamError('KMA API key missing', 'missing_api_key');
-    }
-
-    try {
-      const { nx, ny } = this.toKmaGrid(lat, lon);
-      // TODO: fill in actual endpoint + params (getVilageFcst/getUltraSrtFcst)
-      const url = 'http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst';
-      const params = {
-        serviceKey: ENV.KMA_SERVICE_KEY, dataType: 'JSON',
-        base_date: '20241003', base_time: '0800', nx, ny, pageNo: 1, numOfRows: 500,
-      };
-
-      await http.get(url, { params });
-      // TODO: parse and map SKY/TMX/TMN from KMA categories
-      return {
-        temp: 22,
-        feels_like: 23,
-        condition: 'clear',
-        pop: 0.1,
-        hourly: [
-          { time: new Date().toISOString(), temp: 22, pop: 0.1, condition: 'clear' },
-        ],
-      };
-    } catch (err: any) {
-      const code = err.code === 'ECONNABORTED' ? 'timeout' : 'upstream_error';
-      throw new UpstreamError(`kma failed: ${err.message}`, code, err.response?.status);
-    }
-  }
-}
-
-// Keep the function export for backward compatibility
-export async function fetchKmaWeather(lat: number, lon: number): Promise<KmaWeather> {
-  if (isMock) {
-    return { source: 'kma', source_status: 'ok', updated_at: new Date().toISOString(),
-      sky: 'SUNNY', tmin_c: 17, tmax_c: 24, note: 'mock' };
-  }
-  if (!ENV.KMA_SERVICE_KEY) {
-    return { source: 'kma', source_status: 'missing_api_key', updated_at: new Date().toISOString(),
-      note: 'KMA_SERVICE_KEY is missing. Provide a key to enable live data.' };
-  }
-
-  try {
-    const adapter = new KMAAdapter();
-    const { nx, ny } = adapter['toKmaGrid'](lat, lon);
-    // TODO: fill in actual endpoint + params (getVilageFcst/getUltraSrtFcst)
-    const url = 'http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst';
-    const params = {
-      serviceKey: ENV.KMA_SERVICE_KEY, dataType: 'JSON',
-      base_date: '20241003', base_time: '0800', nx, ny, pageNo: 1, numOfRows: 500,
-    };
-
-    await http.get(url, { params });
-    // TODO: parse and map SKY/TMX/TMN from KMA categories
-    return {
-      source: 'kma',
-      source_status: 'ok',
-      updated_at: new Date().toISOString(),
-      sky: 'SUNNY',
-      tmin_c: 17,
-      tmax_c: 24,
-    };
-  } catch (err: any) {
-    const code = err.code === 'ECONNABORTED' ? 'timeout' : 'upstream_error';
-    throw new UpstreamError(`kma failed: ${err.message}`, code, err.response?.status);
+        const merged = mergeUltraAndVillage(ultra.data, village.data, { now: when });
+        return buildWeatherBrief(merged, 'ok');
+      },
+      mock: async () => {
+        const [ultra, village] = await Promise.all([
+          readFixture(ULTRA_FIXTURE),
+          readFixture(VILLAGE_FIXTURE),
+        ]);
+        const merged = mergeUltraAndVillage(ultra, village, { now: when });
+        const status = hasKeys ? 'upstream_error' : 'missing_api_key';
+        const note = hasKeys
+          ? 'KMA live request failed — returning fixture data.'
+          : 'KMA API key missing — returning fixture data.';
+        return buildWeatherBrief(merged, status, note);
+      },
+    });
   }
 }
+
+export const kmaAdapter = new KMAAdapter();

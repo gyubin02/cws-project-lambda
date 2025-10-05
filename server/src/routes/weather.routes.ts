@@ -2,13 +2,13 @@
  * 날씨 라우트
  */
 
-import { Router } from 'express';
+import express from 'express';
 import { z } from 'zod';
 import { WeatherService } from '../services/weather.service';
 import { logger } from '../lib/logger';
 import { UpstreamError } from '../lib/errors';
 
-const router = Router();
+const router = express.Router();
 const weatherService = new WeatherService();
 
 // 요청 스키마 검증
@@ -18,7 +18,7 @@ const WeatherQuerySchema = z.object({
   time: z.string().datetime().optional(),
 });
 
-router.get('/', async (req, res) => {
+router.get('/', async (req: any, res: any) => {
   const reqId = req.headers['x-request-id'] as string;
   
   try {
@@ -39,11 +39,16 @@ router.get('/', async (req, res) => {
     const timeDate = time ? new Date(time) : undefined;
     
     // 날씨 데이터 조회
-    const weatherData = await weatherService.getWeatherData(coordinates, timeDate);
-    
-    logger.info({ reqId, temp: weatherData.temp, condition: weatherData.condition }, 'Weather data retrieved successfully');
-    
-    return res.json(weatherData);
+    const weatherBrief = await weatherService.getWeatherBrief(coordinates, timeDate);
+
+    logger.info({
+      reqId,
+      temp_c: weatherBrief.temp_c,
+      condition: weatherBrief.condition,
+      status: weatherBrief.source_status,
+    }, 'Weather data retrieved successfully');
+
+    return res.json(weatherBrief);
   } catch (error) {
     logger.error({ 
       reqId, 

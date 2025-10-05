@@ -7,11 +7,13 @@ import cors from 'cors';
 import helmet from 'helmet';
 import { randomUUID } from 'crypto';
 import { requestLogger, logger } from './lib/logger';
+import { rateLimiter } from './lib/rateLimit';
 import briefingRoutes from './routes/briefing.routes';
 import weatherRoutes from './routes/weather.routes';
 import airRoutes from './routes/air.routes';
 import trafficRoutes from './routes/traffic.routes';
 import healthRoutes from './routes/health.routes';
+import profileRoutes from './routes/profile.routes';
 
 const app = express();
 
@@ -35,7 +37,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Request ID 미들웨어
-app.use((req, res, next) => {
+app.use((req: any, res: any, next: any) => {
   const rid = (req.headers['x-request-id'] as string) || randomUUID();
   res.setHeader('X-Request-ID', rid);
   (req as any).requestId = rid;
@@ -44,16 +46,18 @@ app.use((req, res, next) => {
 
 // 로깅 미들웨어
 app.use(requestLogger);
+app.use(rateLimiter);
 
 // API 라우트
 app.use('/api/v1/briefing', briefingRoutes);
 app.use('/api/v1/weather', weatherRoutes);
 app.use('/api/v1/air', airRoutes);
 app.use('/api/v1/traffic', trafficRoutes);
+app.use('/api/v1/profile', profileRoutes);
 app.use('/api/v1/healthz', healthRoutes);
 
 // 루트 경로
-app.get('/', (_req, res) => {
+app.get('/', (_req: any, res: any) => {
   res.json({
     service: 'Outing Briefing API',
     version: '1.0.0',
@@ -70,7 +74,7 @@ app.get('/', (_req, res) => {
 });
 
 // 404 핸들러
-app.use('*', (req, res) => {
+app.use('*', (req: any, res: any) => {
   res.status(404).json({
     error: 'Not Found',
     message: `Route ${req.originalUrl} not found`,
@@ -79,7 +83,7 @@ app.use('*', (req, res) => {
 });
 
 // 전역 에러 핸들러
-app.use((error: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+app.use((error: any, req: any, res: any, _next: any) => {
   const reqId = (req as any).requestId as string;
   
   logger.error({ 

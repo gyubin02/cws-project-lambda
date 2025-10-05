@@ -2,13 +2,13 @@
  * 대기질 라우트
  */
 
-import { Router } from 'express';
+import express from 'express';
 import { z } from 'zod';
 import { AirService } from '../services/air.service';
 import { logger } from '../lib/logger';
 import { UpstreamError } from '../lib/errors';
 
-const router = Router();
+const router = express.Router();
 const airService = new AirService();
 
 // 요청 스키마 검증
@@ -23,7 +23,7 @@ const AirQuerySchema = z.object({
   }
 );
 
-router.get('/', async (req, res) => {
+router.get('/', async (req: any, res: any) => {
   const reqId = req.headers['x-request-id'] as string;
   
   try {
@@ -50,11 +50,17 @@ router.get('/', async (req, res) => {
     }
     
     // 대기질 데이터 조회
-    const airData = await airService.getAirQualityData(coordinates, district);
-    
-    logger.info({ reqId, pm10: airData.pm10, pm25: airData.pm25, grade: airData.grade }, 'Air quality data retrieved successfully');
-    
-    return res.json(airData);
+    const airBrief = await airService.getAirBrief(coordinates, district);
+
+    logger.info({
+      reqId,
+      pm10: airBrief.pm10,
+      pm25: airBrief.pm25,
+      grade: airBrief.grade,
+      status: airBrief.source_status,
+    }, 'Air quality data retrieved successfully');
+
+    return res.json(airBrief);
   } catch (error) {
     logger.error({ 
       reqId, 

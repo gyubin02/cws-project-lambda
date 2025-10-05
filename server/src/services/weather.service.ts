@@ -1,87 +1,43 @@
 /**
- * 날씨 서비스
+ * 날씨 서비스 (KMA)
  */
 
 import { KMAAdapter } from '../adapters/kma.adapter';
 import { logger } from '../lib/logger';
 import { UpstreamError } from '../lib/errors';
-import { KMAWeatherData, Coordinates } from '../types';
+import type { Coordinates, WeatherBrief } from '../types';
+import type { SourceStatus } from '../lib/errors';
 
 export class WeatherService {
-  private kmaAdapter: KMAAdapter;
+  private readonly adapter: KMAAdapter;
 
   constructor() {
-    this.kmaAdapter = new KMAAdapter();
+    this.adapter = new KMAAdapter();
   }
 
-  async getWeatherData(coordinates: Coordinates, time?: Date): Promise<KMAWeatherData> {
+  async getWeatherBrief(coordinates: Coordinates, when?: Date): Promise<WeatherBrief> {
     try {
-      logger.debug({ 
-        lat: coordinates.lat, 
-        lon: coordinates.lon, 
-        time: time?.toISOString() 
-      }, 'Fetching weather data');
-
-      const weatherData = await this.kmaAdapter.getWeatherData(
-        coordinates.lat,
-        coordinates.lon,
-        time
-      );
-
-      logger.info({
-        temp: weatherData.temp,
-        condition: weatherData.condition,
-        pop: weatherData.pop,
-      }, 'Weather data retrieved successfully');
-
-      return weatherData;
+      logger.debug({ coordinates, when: when?.toISOString() }, 'Fetching weather brief');
+      return await this.adapter.getWeatherData(coordinates.lat, coordinates.lon, when);
     } catch (error) {
-      logger.error({ 
-        error: error instanceof Error ? error.message : 'Unknown error',
-        coordinates,
-      }, 'Failed to get weather data');
-      
-      throw new UpstreamError('Weather service unavailable', 'upstream_error');
+      const upstream = error instanceof UpstreamError ? error : undefined;
+      const status: SourceStatus = upstream?.code ?? 'upstream_error';
+      const message = upstream?.message ?? (error instanceof Error ? error.message : 'Unknown error');
+
+      logger.error({ error: message, coordinates }, 'Weather adapter failed');
+
+      return this.buildFailureBrief(status, message);
     }
   }
 
-  async getWeatherSummary(coordinates: Coordinates, time?: Date): Promise<string> {
-    try {
-      const weatherData = await this.getWeatherData(coordinates, time);
-      
-      const conditionText = this.getConditionText(weatherData.condition);
-      const popText = this.getPopText(weatherData.pop);
-      const tempText = `${Math.round(weatherData.temp)}°C (체감 ${Math.round(weatherData.feels_like)}°C)`;
-      
-      return `${conditionText}, ${tempText}. ${popText}`;
-    } catch (error) {
-      logger.error({ error: error instanceof Error ? error.message : 'Unknown error' }, 'Failed to generate weather summary');
-      return '날씨 정보를 가져올 수 없습니다.';
-    }
-  }
-
-  private getConditionText(condition: string): string {
-    const conditionMap: Record<string, string> = {
-      'clear': '맑음',
-      'cloudy': '구름많음',
-      'rain': '비',
-      'snow': '눈',
-      'storm': '소나기',
-      'fog': '안개',
+  private buildFailureBrief(status: SourceStatus, note: string): WeatherBrief {
+    return {
+      source: 'kma',
+      source_status: status,
+      updated_at: new Date().toISOString(),
+      notes: [note],
     };
-    
-    return conditionMap[condition] || '알 수 없음';
-  }
-
-  private getPopText(pop: number): string {
-    if (pop === 0) {
-      return '강수확률 0%';
-    } else if (pop < 0.3) {
-      return `강수확률 ${Math.round(pop * 100)}% (낮음)`;
-    } else if (pop < 0.7) {
-      return `강수확률 ${Math.round(pop * 100)}% (보통)`;
-    } else {
-      return `강수확률 ${Math.round(pop * 100)}% (높음)`;
-    }
   }
 }
+
+export const weatherService = new WeatherService();

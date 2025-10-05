@@ -9,7 +9,7 @@
     "start": "node dist/server.js",
     "lint": "eslint . --ext .ts",
     "lint:fix": "eslint . --ext .ts --fix",
-    "test": "jest",
+    "test": "node --test tests/**/*.js",
     "test:watch": "jest --watch"
   },
   "keywords": [
