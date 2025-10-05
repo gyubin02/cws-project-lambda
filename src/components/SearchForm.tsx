@@ -13,12 +13,10 @@ interface SearchFormProps {
 export function SearchForm({ onSubmit, loading }: SearchFormProps) {
   const [from, setFrom] = useState('강남역');
   const [to, setTo] = useState('서울역');
-  const [lat, setLat] = useState(37.5665);
-  const [lon, setLon] = useState(126.9780);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit({ lat, lon, from, to });
+    onSubmit({ from, to });
   };
 
   return (
@@ -49,36 +47,6 @@ export function SearchForm({ onSubmit, loading }: SearchFormProps) {
             value={to}
             onChange={(e) => setTo(e.target.value)}
             placeholder="목적지"
-            required
-            className="transition-smooth"
-          />
-        </div>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="space-y-2">
-          <Label htmlFor="lat">위도</Label>
-          <Input
-            id="lat"
-            type="number"
-            step="0.000001"
-            value={lat}
-            onChange={(e) => setLat(parseFloat(e.target.value))}
-            placeholder="37.5665"
-            required
-            className="transition-smooth"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="lon">경도</Label>
-          <Input
-            id="lon"
-            type="number"
-            step="0.000001"
-            value={lon}
-            onChange={(e) => setLon(parseFloat(e.target.value))}
-            placeholder="126.9780"
             required
             className="transition-smooth"
           />

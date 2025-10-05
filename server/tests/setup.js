@@ -5,6 +5,7 @@ const path = require('node:path');
 process.env['NODE_ENV'] = 'test';
 process.env['MOCK'] = process.env['MOCK'] ?? '1';
 process.env['PORT'] = process.env['PORT'] ?? '0';
+process.env['SKIP_TMAP_TESTS'] = process.env['SKIP_TMAP_TESTS'] ?? '1';
 
 const storePath = path.resolve(__dirname, '../.data/store.json');
 const { profileService } = require('../dist/services/profile.service');

@@ -2,6 +2,7 @@ import {
   AirQuality,
   AirQualityGrade,
   Briefing,
+  LocationSource,
   SearchParams,
   SourceStatus,
   TrafficInfo,
@@ -67,6 +68,17 @@ type ServerBriefing = {
   } | null;
 };
 
+type ServerBriefingMeta = {
+  origin?: { source?: string | null } | null;
+  destination?: { source?: string | null } | null;
+  warnings?: string[] | null;
+};
+
+type ServerBriefingResponse = {
+  data?: ServerBriefing | null;
+  meta?: ServerBriefingMeta | null;
+};
+
 const SKY_MAP: Record<string, WeatherCondition | undefined> = {
   clear: 'SUNNY',
   sunny: 'SUNNY',
@@ -91,7 +103,15 @@ const AIR_GRADE_MAP: Record<string, AirQualityGrade | undefined> = {
   'very bad': 'VERY_BAD',
 };
 
-function normalizeBriefing(server: ServerBriefing | null): Briefing {
+function normalizeLocationSource(value?: string | null): LocationSource | undefined {
+  if (!value) return undefined;
+  if (value === 'stored' || value === 'geocoded' || value === 'request') {
+    return value;
+  }
+  return undefined;
+}
+
+function normalizeBriefing(server: ServerBriefing | null, meta?: ServerBriefingMeta | null): Briefing {
   if (!server) {
     return {
       summary: '',
@@ -149,7 +169,7 @@ function normalizeBriefing(server: ServerBriefing | null): Briefing {
       }
     : undefined;
 
-  return {
+  const briefing: Briefing = {
     summary: server.summary ?? '',
     notices: server.notices ?? [],
     from: server.from ?? undefined,
@@ -158,32 +178,67 @@ function normalizeBriefing(server: ServerBriefing | null): Briefing {
     air,
     traffic,
   };
+
+  const originSource = normalizeLocationSource(meta?.origin?.source ?? undefined);
+  const destinationSource = normalizeLocationSource(meta?.destination?.source ?? undefined);
+  const warnings = Array.isArray(meta?.warnings)
+    ? meta.warnings.filter((item): item is string => typeof item === 'string' && item.length > 0)
+    : [];
+
+  if (originSource || destinationSource || warnings.length) {
+    briefing.meta = {};
+    if (originSource) {
+      briefing.meta.origin = { source: originSource };
+    }
+    if (destinationSource) {
+      briefing.meta.destination = { source: destinationSource };
+    }
+    if (warnings.length) {
+      briefing.meta.warnings = warnings;
+    }
+  }
+
+  return briefing;
 }
 
 export async function getBriefing(params: SearchParams): Promise<Briefing> {
   const qs = new URLSearchParams();
-  Object.entries(params).forEach(([k, v]) => {
-    if (v !== undefined && v !== null) qs.set(k, String(v));
-  });
+  if (params.from) qs.set('from', params.from);
+  if (params.to) qs.set('to', params.to);
 
   const res = await fetch(`${API_BASE_URL}/briefing?${qs.toString()}`, { method: 'GET' });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(text || `Briefing request failed: ${res.status}`);
   }
-  const raw = (await res.json()) as ServerBriefing | null;
-  return normalizeBriefing(raw);
+  const raw = (await res.json()) as ServerBriefingResponse;
+  return normalizeBriefing(raw?.data ?? null, raw?.meta ?? null);
 }
 
-export async function getWeather(lat: number, lon: number) {
-  const url = `${API_BASE_URL}/weather?lat=${lat}&lon=${lon}`;
+export async function getWeather(params: { location?: string; lat?: number; lon?: number }) {
+  const qs = new URLSearchParams();
+  if (params.location) {
+    qs.set('location', params.location);
+  }
+  if (params.lat !== undefined && params.lon !== undefined) {
+    qs.set('lat', String(params.lat));
+    qs.set('lon', String(params.lon));
+  }
+  const url = `${API_BASE_URL}/weather?${qs.toString()}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Weather request failed: ${res.status}`);
   return res.json();
 }
 
-export async function getAirQuality(lat: number, lon: number) {
-  const url = `${API_BASE_URL}/air?lat=${lat}&lon=${lon}`;
+export async function getAirQuality(params: { location?: string; lat?: number; lon?: number; district?: string }) {
+  const qs = new URLSearchParams();
+  if (params.location) qs.set('location', params.location);
+  if (params.lat !== undefined && params.lon !== undefined) {
+    qs.set('lat', String(params.lat));
+    qs.set('lon', String(params.lon));
+  }
+  if (params.district) qs.set('district', params.district);
+  const url = `${API_BASE_URL}/air?${qs.toString()}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Air quality request failed: ${res.status}`);
   return res.json();

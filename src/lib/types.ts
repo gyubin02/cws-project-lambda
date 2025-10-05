@@ -62,11 +62,18 @@ export interface Briefing {
   weather?: Weather;
   air?: AirQuality;
   traffic?: TrafficInfo;
+  meta?: BriefingMeta;
 }
 
 export interface SearchParams {
-  lat: number;
-  lon: number;
   from: string;
   to: string;
+}
+
+export type LocationSource = 'stored' | 'geocoded' | 'request';
+
+export interface BriefingMeta {
+  origin?: { source: LocationSource };
+  destination?: { source: LocationSource };
+  warnings?: string[];
 }
