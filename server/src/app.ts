@@ -14,6 +14,7 @@ import airRoutes from './routes/air.routes';
 import trafficRoutes from './routes/traffic.routes';
 import healthRoutes from './routes/health.routes';
 import profileRoutes from './routes/profile.routes';
+import settingsRoutes from './routes/settings.routes';
 
 const app = express();
 
@@ -54,6 +55,7 @@ app.use('/api/v1/weather', weatherRoutes);
 app.use('/api/v1/air', airRoutes);
 app.use('/api/v1/traffic', trafficRoutes);
 app.use('/api/v1/profile', profileRoutes);
+app.use('/api/v1/settings', settingsRoutes);
 app.use('/api/v1/healthz', healthRoutes);
 
 // 루트 경로
@@ -68,6 +70,7 @@ app.get('/', (_req: any, res: any) => {
       weather: '/api/v1/weather',
       air: '/api/v1/air',
       traffic: '/api/v1/traffic',
+      settings: '/api/v1/settings',
       health: '/api/v1/healthz',
     },
   });

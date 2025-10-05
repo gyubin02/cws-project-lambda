@@ -50,6 +50,37 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /settings:
+    get:
+      summary: Get user settings
+      responses:
+        '200':
+          description: Settings retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSettings'
+    post:
+      summary: Upsert user settings (geocodes names to coordinates)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettingsRequest'
+      responses:
+        '200':
+          description: Settings saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSettings'
+        '400':
+          description: Validation or geocode error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /briefing:
     get:
       summary: Retrieve integrated commute briefing
@@ -63,19 +94,17 @@ paths:
         - in: query
           name: from
           required: false
-          description: Origin coordinates formatted as "lat,lon"
+          description: Place name or "lat,lon" string for the origin.
           schema:
             type: string
-            pattern: '^-?\d+\.\d+,-?\d+\.\d+$'
-            example: "37.55,126.98"
+            example: "Gangnam Station"
         - in: query
           name: to
           required: false
-          description: Destination coordinates formatted as "lat,lon"
+          description: Place name or "lat,lon" string for the destination.
           schema:
             type: string
-            pattern: '^-?\d+\.\d+,-?\d+\.\d+$'
-            example: "37.40,127.10"
+            example: "Seoul Station"
         - in: query
           name: time
           required: false
@@ -89,9 +118,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Briefing'
+                $ref: '#/components/schemas/BriefingResponse'
         '400':
-          description: Missing coordinates and profile
+          description: Missing coordinates or invalid input
           content:
             application/json:
               schema:
@@ -107,13 +136,20 @@ paths:
       summary: Retrieve weather brief
       parameters:
         - in: query
+          name: location
+          required: false
+          description: Place name or "lat,lon" string. Optional when coordinate lock is active and stored origin exists.
+          schema:
+            type: string
+            example: "Gangnam Station"
+        - in: query
           name: lat
-          required: true
+          required: false
           schema:
             type: number
         - in: query
           name: lon
-          required: true
+          required: false
           schema:
             type: number
         - in: query
@@ -128,9 +164,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/WeatherBrief'
+                $ref: '#/components/schemas/WeatherResponse'
         '400':
-          description: Validation error
+          description: Validation error or missing location
           content:
             application/json:
               schema:
@@ -139,6 +175,13 @@ paths:
     get:
       summary: Retrieve air quality brief
       parameters:
+        - in: query
+          name: location
+          required: false
+          description: Place name or "lat,lon" string. Optional when coordinate lock is active and stored origin exists.
+          schema:
+            type: string
+            example: "Gangnam Station"
         - in: query
           name: lat
           required: false
@@ -160,9 +203,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AirBrief'
+                $ref: '#/components/schemas/AirResponse'
         '400':
-          description: Validation error
+          description: Validation error or missing location
           content:
             application/json:
               schema:
@@ -437,6 +480,61 @@ components:
         recommendation:
           $ref: '#/components/schemas/Recommendation'
       required: [summary, notices, traffic]
+    LocationMeta:
+      type: object
+      properties:
+        source:
+          type: string
+          enum: [stored, geocoded, request]
+    BriefingMeta:
+      type: object
+      properties:
+        origin:
+          $ref: '#/components/schemas/LocationMeta'
+        destination:
+          $ref: '#/components/schemas/LocationMeta'
+        warnings:
+          type: array
+          items:
+            type: string
+    BriefingResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/Briefing'
+        meta:
+          $ref: '#/components/schemas/BriefingMeta'
+      required: [data]
+    WeatherResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/WeatherBrief'
+        meta:
+          type: object
+          properties:
+            location:
+              $ref: '#/components/schemas/LocationMeta'
+            warnings:
+              type: array
+              items:
+                type: string
+      required: [data]
+    AirResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/AirBrief'
+        meta:
+          type: object
+          properties:
+            location:
+              $ref: '#/components/schemas/LocationMeta'
+            warnings:
+              type: array
+              items:
+                type: string
+      required: [data]
     ExpresswayTrafficResponse:
       type: object
       properties:
@@ -450,6 +548,45 @@ components:
             toToll:
               type: string
       required: [expressway, meta]
+    UserLocationSetting:
+      type: object
+      properties:
+        name:
+          type: string
+        lat:
+          type: number
+        lon:
+          type: number
+        lastGeocodedAt:
+          type: string
+          format: date-time
+      required: [name]
+    UserSettings:
+      type: object
+      properties:
+        defaultOrigin:
+          $ref: '#/components/schemas/UserLocationSetting'
+        defaultDestination:
+          $ref: '#/components/schemas/UserLocationSetting'
+        coordinateLock:
+          type: boolean
+    SettingsRequest:
+      type: object
+      properties:
+        defaultOrigin:
+          type: object
+          properties:
+            name:
+              type: string
+          required: [name]
+        defaultDestination:
+          type: object
+          properties:
+            name:
+              type: string
+          required: [name]
+        coordinateLock:
+          type: boolean
     ProfileInput:
       type: object
       properties:

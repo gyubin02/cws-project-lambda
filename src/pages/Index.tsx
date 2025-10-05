@@ -21,6 +21,12 @@ const Index = () => {
   const [airModalOpen, setAirModalOpen] = useState(false);
   const [trafficModalOpen, setTrafficModalOpen] = useState(false);
 
+  const sourceLabels: Record<string, string> = {
+    stored: '저장 좌표',
+    geocoded: '지오코딩',
+    request: '요청값',
+  };
+
   const handleSearch = async (params: SearchParams) => {
     setLoading(true);
     try {
@@ -63,6 +69,18 @@ const Index = () => {
         {briefing && !loading && (
           <div className="mb-6 p-4 rounded-lg bg-primary/10 border border-primary">
             <p className="text-center text-foreground font-medium">{briefing.summary}</p>
+            {briefing.meta && (
+              <div className="mt-2 text-xs text-muted-foreground text-center space-y-1">
+                <p>
+                  출발지: {sourceLabels[briefing.meta.origin?.source ?? 'request']} · 도착지: {sourceLabels[briefing.meta.destination?.source ?? 'request']}
+                </p>
+                {briefing.meta.warnings && briefing.meta.warnings.length > 0 && (
+                  <p className="flex items-center justify-center gap-1 text-amber-500">
+                    ⚠️ {briefing.meta.warnings.join(', ')}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
 

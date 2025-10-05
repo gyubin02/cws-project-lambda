@@ -28,6 +28,8 @@ export const api = {
   getProfile: <T>(userId: string) => request<T>(`/profile?user_id=${encodeURIComponent(userId)}`),
   saveProfile: <T>(profile: unknown) => request<T>(`/profile`, { method: "POST", body: JSON.stringify(profile) }),
   getBriefing: <T>(userId: string) => request<T>(`/briefing?user_id=${encodeURIComponent(userId)}`),
+  getSettings: <T>() => request<T>(`/settings`),
+  saveSettings: <T>(payload: unknown) => request<T>(`/settings`, { method: "POST", body: JSON.stringify(payload) }),
 };
 
 export type ApiError = {

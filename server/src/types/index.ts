@@ -6,3 +6,4 @@ export * from './briefing';
 export * from './kma';
 export * from './airkorea';
 export * from './expressway';
+export * from './settings';

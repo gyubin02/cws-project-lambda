@@ -3,6 +3,7 @@
  */
 
 import { Coordinates } from '../types';
+import { UpstreamError } from './errors';
 import tollgateCatalog from '../../data/expressway_tollgates.json';
 import type { ExpresswayTollgate } from '../types';
 
@@ -113,7 +114,11 @@ export function getNearestBaseTime(targetTime?: Date): { baseDate: string; baseT
 /**
  * 좌표 문자열 파싱 ("lat,lon" -> {lat, lon})
  */
-export const COORDINATE_REGEX = /^-?\d+\.\d+,-?\d+\.\d+$/;
+export const COORDINATE_REGEX = /^\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*$/;
+
+export function isCoordinateLike(value: string): boolean {
+  return COORDINATE_REGEX.test(value);
+}
 
 export function parseCoordinates(coordStr: string): Coordinates {
   const trimmed = coordStr.trim();
@@ -125,6 +130,9 @@ export function parseCoordinates(coordStr: string): Coordinates {
   const lon = Number(lonStr);
   if (Number.isNaN(lat) || Number.isNaN(lon)) {
     throw new Error(`Invalid coordinates: ${trimmed}`);
+  }
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+    throw new Error(`Invalid coordinate range: ${trimmed}`);
   }
   return { lat, lon };
 }
@@ -150,7 +158,11 @@ export async function parseCoordOrGeocode(
       return coordinates as Coordinates;
     }
   } catch (error) {
-    // ignore and fall through to unified message
+    if (error instanceof UpstreamError) {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : LOCATION_INPUT_MESSAGE;
+    throw new Error(message || LOCATION_INPUT_MESSAGE);
   }
 
   throw new Error(LOCATION_INPUT_MESSAGE);
