@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SearchForm } from '@/components/SearchForm';
@@ -43,8 +44,10 @@ const Index = () => {
             <h1 className="text-2xl font-bold text-foreground">외출 브리핑</h1>
             <p className="text-sm text-muted-foreground">완벽한 여행을 계획하세요</p>
           </div>
-          <Button variant="ghost" size="icon">
-            <Settings className="h-5 w-5" />
+          <Button asChild variant="ghost" size="icon">
+            <Link to="/settings" aria-label="User settings">
+              <Settings className="h-5 w-5" />
+            </Link>
           </Button>
         </div>
       </header>
