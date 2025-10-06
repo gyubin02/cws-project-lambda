@@ -4,8 +4,8 @@ const assert = require('node:assert/strict');
 const { tmapAdapter } = require('../dist/adapters/tmap.adapter');
 const { saveUserSettings, getUserSettings } = require('../dist/services/settings.service');
 
-const ORIGIN = 'Gangnam Station';
-const DEST = 'Seoul Station';
+const ORIGIN = '강남역';
+const DEST = '서울역';
 
 test('saveUserSettings stores coordinates and respects coordinate lock toggle', async () => {
   const originCoords = await tmapAdapter.geocode(ORIGIN);

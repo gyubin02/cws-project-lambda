@@ -1,10 +1,18 @@
 import axios, { AxiosError, AxiosRequestConfig } from 'axios';
-import { ENV } from './env';
+
+const toNumber = (value: string | undefined, fallback: number): number => {
+  if (!value) return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const REQUEST_TIMEOUT_MS = toNumber(process.env['REQUEST_TIMEOUT_MS'], 7000);
+const RETRY_MAX_ATTEMPTS = toNumber(process.env['RETRY_MAX_ATTEMPTS'], 2);
 
 type RetryableConfig = AxiosRequestConfig & { __retryCount?: number };
 
 export const http = axios.create({
-  timeout: ENV.REQUEST_TIMEOUT_MS,
+  timeout: REQUEST_TIMEOUT_MS,
 });
 
 http.interceptors.response.use(
@@ -26,7 +34,7 @@ http.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    const maxAttempts = Math.max(0, ENV.RETRY_MAX_ATTEMPTS);
+    const maxAttempts = Math.max(0, RETRY_MAX_ATTEMPTS);
     cfg.__retryCount = cfg.__retryCount ?? 0;
 
     if (cfg.__retryCount >= maxAttempts) {

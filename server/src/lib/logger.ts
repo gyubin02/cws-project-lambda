@@ -1,70 +1,30 @@
-/**
- * Pino 로거 설정
- */
-
 import pino from 'pino';
 
-const isDevelopment = process.env['NODE_ENV'] === 'development';
+const enablePretty =
+  process.env['LOG_PRETTY'] === '1' ||
+  (process.env['NODE_ENV'] !== 'production' && process.stdout.isTTY);
 
-export const logger = pino({
-  level: isDevelopment ? 'debug' : 'info',
-  ...(isDevelopment && {
-    transport: {
-      target: 'pino-pretty',
-      options: {
-        colorize: true,
-        translateTime: 'SYS:standard',
-        ignore: 'pid,hostname',
+let logger: ReturnType<typeof pino>;
+
+if (enablePretty) {
+  try {
+    logger = pino({
+      transport: {
+        // optional dependency; may not be installed
+        target: 'pino-pretty',
+        options: {
+          colorize: true,
+          translateTime: 'SYS:standard',
+          singleLine: false,
+        },
       },
-    },
-  }),
-});
+    });
+  } catch {
+    // Fallback if pino-pretty is not installed or cannot be resolved
+    logger = pino();
+  }
+} else {
+  logger = pino();
+}
 
-export const requestLogger = (req: any, res: any, next: () => void) => {
-  const start = Date.now();
-  const reqId = req.headers['x-request-id'] as string || `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  
-  req.headers['x-request-id'] = reqId;
-  
-  res.on('finish', () => {
-    const duration = Date.now() - start;
-    logger.info({
-      reqId,
-      method: req.method,
-      url: req.url,
-      status: res.statusCode,
-      duration,
-      userAgent: req.get('User-Agent'),
-      ip: req.ip,
-    }, 'Request completed');
-  });
-  
-  next();
-};
-
-export const logUpstreamCall = (
-  reqId: string,
-  upstream: string,
-  url: string,
-  status: number,
-  duration: number,
-  cacheHit: boolean = false
-) => {
-  logger.info({
-    reqId,
-    upstream,
-    url,
-    status,
-    duration,
-    cacheHit,
-  }, 'Upstream API call');
-};
-
-export const logError = (reqId: string, error: Error, context?: Record<string, unknown>) => {
-  logger.error({
-    reqId,
-    error: error.message,
-    stack: error.stack,
-    ...context,
-  }, 'Error occurred');
-};
+export { logger };

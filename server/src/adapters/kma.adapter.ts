@@ -3,6 +3,7 @@ import path from 'node:path';
 import { ENV } from '../lib/env';
 import { liveOrMock } from '../lib/liveOrMock';
 import { http } from '../lib/http';
+import { logger } from '../lib/logger';
 import { calculateFeelsLike, mapWeatherCondition, normalizePop } from '../lib/util';
 import { latLonToGrid, mergeUltraAndVillage, selectBaseSlots } from '../lib/kma.util';
 import type { WeatherBrief, WeatherHourly } from '../types';
@@ -10,6 +11,7 @@ import type { WeatherBrief, WeatherHourly } from '../types';
 const FIXTURE_DIR = path.resolve(__dirname, '../../../fixtures');
 const ULTRA_FIXTURE = path.join(FIXTURE_DIR, 'kma_ultra.sample.json');
 const VILLAGE_FIXTURE = path.join(FIXTURE_DIR, 'kma_village.sample.json');
+const KMA_BASE_URL = (process.env['KMA_BASE_URL'] ?? '').trim() || 'http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0';
 
 type MergeResult = ReturnType<typeof mergeUltraAndVillage>;
 
@@ -95,18 +97,34 @@ const buildWeatherBrief = (
 
 export class KMAAdapter {
   async getWeatherData(lat: number, lon: number, when: Date = new Date()): Promise<WeatherBrief> {
-    const hasKeys = Boolean(ENV.KMA_API_KEY);
     const { nx, ny } = latLonToGrid(lat, lon);
     const slots = selectBaseSlots(when);
+    const mode = liveOrMock('kma');
+    const apiKey = ENV.KMA_SERVICE_KEY;
 
-    return liveOrMock({
-      adapter: 'KMA',
-      hasKeys,
-      live: async () => {
+    const loadMock = async (
+      status: WeatherBrief['source_status'],
+      note: string
+    ): Promise<WeatherBrief> => {
+      const [ultra, village] = await Promise.all([
+        readFixture(ULTRA_FIXTURE),
+        readFixture(VILLAGE_FIXTURE),
+      ]);
+      const merged = mergeUltraAndVillage(ultra, village, { now: when });
+      return buildWeatherBrief(merged, status, note);
+    };
+
+    if (mode === 'live') {
+      if (!apiKey) {
+        logger.warn({ adapter: 'kma' }, 'KMA service key missing during live mode — falling back to fixture data.');
+        return loadMock('missing_api_key', 'KMA service key missing — returning fixture data.');
+      }
+
+      try {
         const [ultra, village] = await Promise.all([
-          http.get(`${ENV.KMA_BASE_URL}/getUltraSrtNcst`, {
+          http.get(`${KMA_BASE_URL}/getUltraSrtNcst`, {
             params: {
-              serviceKey: ENV.KMA_API_KEY,
+              serviceKey: apiKey,
               dataType: 'JSON',
               base_date: slots.ultra_base_date,
               base_time: slots.ultra_base_time,
@@ -114,9 +132,9 @@ export class KMAAdapter {
               ny,
             },
           }),
-          http.get(`${ENV.KMA_BASE_URL}/getVilageFcst`, {
+          http.get(`${KMA_BASE_URL}/getVilageFcst`, {
             params: {
-              serviceKey: ENV.KMA_API_KEY,
+              serviceKey: apiKey,
               dataType: 'JSON',
               base_date: slots.village_base_date,
               base_time: slots.village_base_time,
@@ -128,20 +146,24 @@ export class KMAAdapter {
 
         const merged = mergeUltraAndVillage(ultra.data, village.data, { now: when });
         return buildWeatherBrief(merged, 'ok');
-      },
-      mock: async () => {
-        const [ultra, village] = await Promise.all([
-          readFixture(ULTRA_FIXTURE),
-          readFixture(VILLAGE_FIXTURE),
-        ]);
-        const merged = mergeUltraAndVillage(ultra, village, { now: when });
-        const status = hasKeys ? 'upstream_error' : 'missing_api_key';
-        const note = hasKeys
-          ? 'KMA live request failed — returning fixture data.'
-          : 'KMA API key missing — returning fixture data.';
-        return buildWeatherBrief(merged, status, note);
-      },
-    });
+      } catch (error) {
+        logger.warn(
+          {
+            adapter: 'kma',
+            error: error instanceof Error ? error.message : String(error),
+          },
+          'KMA live request failed — falling back to fixture data.'
+        );
+        return loadMock('upstream_error', 'KMA live request failed — returning fixture data.');
+      }
+    }
+
+    const forcedMock = ENV.MOCK === 1 && !!apiKey;
+    const status: WeatherBrief['source_status'] = forcedMock ? 'upstream_error' : 'missing_api_key';
+    const note = forcedMock
+      ? 'MOCK=1 flag set — returning fixture weather data.'
+      : 'KMA service key missing — returning fixture data.';
+    return loadMock(status, note);
   }
 }
 
