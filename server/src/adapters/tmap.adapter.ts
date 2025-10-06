@@ -396,12 +396,14 @@ async function performLiveGeocode(normalizedQuery: string): Promise<Coordinates>
 
   try {
     const response = await http.get(`${TMAP_BASE_URL}/geo/fullAddrGeo`, {
-      headers: { appKey: apiKey },
+      headers: { appKey: apiKey, Accept: 'application/json' },
       params: {
         fullAddr: normalizedQuery,
         coordType: 'WGS84GEO',
         version: 1,
-        addressFlag: 'F02',
+        addressFlag: 'F00', // 구주소+도로명 둘 다 허용 → 매칭률↑
+        page: 1,
+        count: 20,
       },
     });
 
