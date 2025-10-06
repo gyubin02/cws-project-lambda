@@ -5,6 +5,7 @@ import type { Coordinates, UserLocationSetting } from '../types';
 import { LOCATION_INPUT_MESSAGE, isCoordinateLike, parseCoordinates } from '../lib/util';
 import { tmapAdapter } from '../adapters/tmap.adapter';
 import { getUserSettings } from '../services/settings.service';
+import { liveOrMock } from '../lib/liveOrMock';
 import { UpstreamError } from '../lib/errors';
 
 const router = express.Router();
@@ -156,6 +157,15 @@ router.get('/', async (req: any, res: any) => {
       origin: { source: originSource },
       destination: { source: destinationSource },
       warnings,
+      sources: {
+        traffic: {
+          car: liveOrMock('tmap'),
+          transit: liveOrMock('tmap'),
+          expressway: liveOrMock('expressway'),
+        },
+        weather: liveOrMock('kma'),
+        air: liveOrMock('airkorea'),
+      },
     };
 
     return res.json({ data: briefing, meta });

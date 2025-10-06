@@ -4,6 +4,7 @@ import { cached } from '../lib/cache';
 import { ENV } from '../lib/env';
 import { liveOrMock } from '../lib/liveOrMock';
 import { http } from '../lib/http';
+import { logger } from '../lib/logger';
 import { UpstreamError } from '../lib/errors';
 import type { Coordinates, TrafficBrief, TrafficMode, TrafficStep } from '../types';
 
@@ -11,6 +12,7 @@ const FIXTURE_DIR = path.resolve(__dirname, '../../../fixtures');
 const CAR_FIXTURE_PATH = path.join(FIXTURE_DIR, 'tmap_car.sample.json');
 const TRANSIT_FIXTURE_PATH = path.join(FIXTURE_DIR, 'tmap_transit.sample.json');
 const GEOCODE_FIXTURE_PATH = path.join(FIXTURE_DIR, 'tmap_geocode.sample.json');
+const TMAP_BASE_URL = (process.env['TMAP_BASE_URL'] ?? '').trim() || 'https://apis.openapi.sk.com/tmap';
 
 type CachedMode = Extract<TrafficMode, 'car' | 'transit'>;
 
@@ -295,8 +297,11 @@ function mapTmapGeocode(payload: GeocodePayload, query: string): Coordinates {
 
   if (Array.isArray(payload?.results) && payload.results.length > 0) {
     const normalized = query.trim();
-    const match = payload.results.find((item) => item.query === normalized) ?? payload.results[0];
-    const coordinates = match?.coordinates;
+    const match = payload.results.find((item) => item.query === normalized);
+    if (!match) {
+      throw new UpstreamError(`TMAP geocode result missing entry for "${normalized}"`, 'bad_response');
+    }
+    const coordinates = match.coordinates;
     if (coordinates?.lat != null && coordinates.lon != null) {
       return coordinates;
     }
@@ -308,15 +313,27 @@ function mapTmapGeocode(payload: GeocodePayload, query: string): Coordinates {
 export class TmapAdapter {
   async routeCar(from: Coordinates, to: Coordinates, when?: Date): Promise<TrafficBrief> {
     const cacheKey = buildCacheKey('car', from, to, when);
-    const hasKeys = Boolean(ENV.TMAP_API_KEY);
+    const mode = liveOrMock('tmap');
 
-    return cached(cacheKey, async () =>
-      liveOrMock({
-        adapter: 'TMAP',
-        hasKeys,
-        live: async () => {
+    return cached(cacheKey, async () => {
+      const fixture = async (
+        status: TrafficBrief['source_status'],
+        note: string
+      ): Promise<TrafficBrief> => {
+        const data = await readJsonFixture(CAR_FIXTURE_PATH);
+        const normalized = normalizeCarRoute(data);
+        return mapNormalizedRoute(normalized, { status, mode: 'car', note });
+      };
+
+      if (mode === 'live') {
+        const apiKey = ENV.TMAP_API_KEY;
+        if (!apiKey) {
+          logger.warn({ adapter: 'tmap' }, 'TMAP API key missing during live mode — falling back to fixture.');
+          return fixture('missing_api_key', 'TMAP API key missing — returning fixture data.');
+        }
+        try {
           const response = await http.post(
-            `${ENV.TMAP_BASE_URL}/routes?version=1`,
+            `${TMAP_BASE_URL}/routes?version=1`,
             {
               startX: from.lon,
               startY: from.lat,
@@ -326,36 +343,62 @@ export class TmapAdapter {
               resCoordType: 'WGS84GEO',
             },
             {
-              headers: { appKey: ENV.TMAP_API_KEY as string },
+              headers: { appKey: apiKey },
             }
           );
 
           const normalized = normalizeCarRoute(response.data);
           return mapNormalizedRoute(normalized, { status: 'ok', mode: 'car' });
-        },
-        mock: async () => {
-          const data = await readJsonFixture(CAR_FIXTURE_PATH);
-          const normalized = normalizeCarRoute(data);
-          const status = hasKeys ? 'upstream_error' : 'missing_api_key';
-          const note = hasKeys
-            ? 'TMAP live request failed — returning fixture data.'
-            : 'TMAP API key missing — returning fixture data.';
-          return mapNormalizedRoute(normalized, { status, mode: 'car', note });
-        },
-      })
-    );
+        } catch (error) {
+          logger.warn(
+            {
+              adapter: 'tmap',
+              error: error instanceof Error ? error.message : String(error),
+            },
+            'TMAP live request failed — falling back to fixture.'
+          );
+          return fixture('upstream_error', 'TMAP live request failed — returning fixture data.');
+        }
+      }
+
+      const forcedMock = ENV.MOCK === 1 && !!ENV.TMAP_API_KEY;
+      const status: TrafficBrief['source_status'] = forcedMock ? 'upstream_error' : 'missing_api_key';
+      const note = forcedMock
+        ? 'MOCK=1 flag set — returning fixture data.'
+        : 'TMAP API key missing — returning fixture data.';
+      return fixture(status, note);
+    });
   }
 
   async routeTransit(from: Coordinates, to: Coordinates, when?: Date): Promise<TrafficBrief> {
     const cacheKey = buildCacheKey('transit', from, to, when);
+    const mode = liveOrMock('tmap');
 
     return cached(cacheKey, async () => {
       const data = await readJsonFixture(TRANSIT_FIXTURE_PATH);
       const normalized = normalizeTransitRoute(data);
+
+      let status: TrafficBrief['source_status'];
+      let note: string;
+
+      if (mode === 'live') {
+        status = 'upstream_error';
+        note = 'TMAP transit live endpoint pending — returning fixture data.';
+      } else if (!ENV.TMAP_API_KEY) {
+        status = 'missing_api_key';
+        note = 'TMAP API key missing — returning fixture data.';
+      } else if (ENV.MOCK === 1) {
+        status = 'upstream_error';
+        note = 'MOCK=1 flag set — returning fixture transit data.';
+      } else {
+        status = 'upstream_error';
+        note = 'TMAP transit live endpoint pending — returning fixture data.';
+      }
+
       return mapNormalizedRoute(normalized, {
-        status: 'missing_api_key',
+        status,
         mode: 'transit',
-        note: 'Transit live endpoint pending — serving fixture data.',
+        note,
       });
     });
   }
@@ -367,25 +410,43 @@ export class TmapAdapter {
     }
 
     const cacheKey = `tmap:geocode:${normalizedQuery.toLowerCase()}`;
-    const hasKeys = Boolean(ENV.TMAP_API_KEY);
+    const mode = liveOrMock('tmap');
 
-    return cached(cacheKey, async () =>
-      liveOrMock({
-        adapter: 'TMAP',
-        hasKeys,
-        live: async () => {
-          const response = await http.get(`${ENV.TMAP_BASE_URL}/geo/fullAddrGeo`, {
-            headers: { appKey: ENV.TMAP_API_KEY as string },
+    return cached(cacheKey, async () => {
+      const loadMock = async (): Promise<Coordinates> => {
+        const data = await readJsonFixture<GeocodePayload>(GEOCODE_FIXTURE_PATH);
+        return mapTmapGeocode(data, normalizedQuery);
+      };
+
+      if (mode === 'live') {
+        const apiKey = ENV.TMAP_API_KEY;
+        if (!apiKey) {
+          logger.warn({ adapter: 'tmap' }, 'TMAP API key missing during live geocode — using fixture data.');
+          return loadMock();
+        }
+        try {
+          const response = await http.get(`${TMAP_BASE_URL}/geo/fullAddrGeo`, {
+            headers: { appKey: apiKey },
             params: { address: normalizedQuery, coordType: 'WGS84GEO' },
           });
           return mapTmapGeocode(response.data, normalizedQuery);
-        },
-        mock: async () => {
-          const data = await readJsonFixture<GeocodePayload>(GEOCODE_FIXTURE_PATH);
-          return mapTmapGeocode(data, normalizedQuery);
-        },
-      })
-    );
+        } catch (error) {
+          logger.warn(
+            {
+              adapter: 'tmap',
+              error: error instanceof Error ? error.message : String(error),
+            },
+            'TMAP live geocode failed — falling back to fixture data.'
+          );
+          return loadMock();
+        }
+      }
+
+      if (ENV.MOCK === 1 && ENV.TMAP_API_KEY) {
+        logger.debug({ adapter: 'tmap' }, 'MOCK=1 flag set — returning fixture geocode data.');
+      }
+      return loadMock();
+    });
   }
 }
 

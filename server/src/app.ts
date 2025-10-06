@@ -6,7 +6,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { randomUUID } from 'crypto';
-import { requestLogger, logger } from './lib/logger';
+import { logger } from './lib/logger';
 import { rateLimiter } from './lib/rateLimit';
 import briefingRoutes from './routes/briefing.routes';
 import weatherRoutes from './routes/weather.routes';
@@ -15,6 +15,50 @@ import trafficRoutes from './routes/traffic.routes';
 import healthRoutes from './routes/health.routes';
 import profileRoutes from './routes/profile.routes';
 import settingsRoutes from './routes/settings.routes';
+
+type ExpressRequest = {
+  method: string;
+  originalUrl?: string;
+  url: string;
+  ip: string;
+  headers: Record<string, string | string[] | undefined>;
+  get(name: string): string | undefined;
+  requestId?: string;
+};
+
+type ExpressResponse = {
+  statusCode: number;
+  setHeader(name: string, value: string): void;
+  on(event: 'finish', listener: () => void): void;
+};
+
+type ExpressNext = () => void;
+
+const requestLogger = (req: ExpressRequest, res: ExpressResponse, next: ExpressNext) => {
+  const start = Date.now();
+  const reqId = (req as any).requestId || (req.headers['x-request-id'] as string) || randomUUID();
+  if (!(req as any).requestId) {
+    (req as any).requestId = reqId;
+    res.setHeader('X-Request-ID', reqId);
+  }
+
+  res.on('finish', () => {
+    logger.info(
+      {
+        reqId,
+        method: req.method,
+        url: req.originalUrl ?? req.url,
+        status: res.statusCode,
+        duration: Date.now() - start,
+        userAgent: req.get('User-Agent'),
+        ip: req.ip,
+      },
+      'Request completed'
+    );
+  });
+
+  next();
+};
 
 const app = express();
 

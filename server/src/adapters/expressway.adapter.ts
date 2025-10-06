@@ -5,9 +5,12 @@ import { ENV } from '../lib/env';
 import { liveOrMock } from '../lib/liveOrMock';
 import { http } from '../lib/http';
 import { UpstreamError } from '../lib/errors';
+import { logger } from '../lib/logger';
 import type { TrafficBrief } from '../types';
 
 const FIXTURE_PATH = path.resolve(__dirname, '../../../fixtures/expressway_tollgate.sample.json');
+const EXPRESSWAY_BASE_URL = (process.env['EXPRESSWAY_BASE_URL'] ?? '').trim() ||
+  'http://data.ex.co.kr/openapi/trtm';
 
 const toNumber = (value: unknown): number | undefined => {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -161,16 +164,29 @@ export class ExpresswayAdapter {
     when?: Date
   ): Promise<TrafficBrief> {
     const cacheKey = `expressway:${fromToll}:${toToll}:${timeBucket10m(when)}`;
-    const hasKeys = Boolean(ENV.EXPRESSWAY_API_KEY);
+    const mode = liveOrMock('expressway');
+    const apiKey = ENV.EXPRESSWAY_API_KEY;
 
-    return cached(cacheKey, async () =>
-      liveOrMock({
-        adapter: 'EXPRESSWAY',
-        hasKeys,
-        live: async () => {
-          const response = await http.get(`${ENV.EXPRESSWAY_BASE_URL}/realUnitTrtm`, {
+    return cached(cacheKey, async () => {
+      const loadMock = async (
+        status: TrafficBrief['source_status'],
+        note: string
+      ): Promise<TrafficBrief> => {
+        const data = await fs.readFile(FIXTURE_PATH, 'utf8');
+        const parsed = JSON.parse(data);
+        return mapExpressway(parsed, { status, note });
+      };
+
+      if (mode === 'live') {
+        if (!apiKey) {
+          logger.warn({ adapter: 'expressway' }, 'Expressway API key missing during live mode — returning fixture data.');
+          return loadMock('missing_api_key', 'Expressway API key missing — returning fixture data.');
+        }
+
+        try {
+          const response = await http.get(`${EXPRESSWAY_BASE_URL}/realUnitTrtm`, {
             params: {
-              key: ENV.EXPRESSWAY_API_KEY,
+              key: apiKey,
               type: 'json',
               iStartUnitCode: fromToll,
               iEndUnitCode: toToll,
@@ -178,18 +194,25 @@ export class ExpresswayAdapter {
           });
 
           return mapExpressway(response.data, { status: 'ok' });
-        },
-        mock: async () => {
-          const data = await fs.readFile(FIXTURE_PATH, 'utf8');
-          const parsed = JSON.parse(data);
-          const status = hasKeys ? 'upstream_error' : 'missing_api_key';
-          const note = hasKeys
-            ? 'Expressway live request failed — returning fixture data.'
-            : 'Expressway API key missing — returning fixture data.';
-          return mapExpressway(parsed, { status, note });
-        },
-      })
-    );
+        } catch (error) {
+          logger.warn(
+            {
+              adapter: 'expressway',
+              error: error instanceof Error ? error.message : String(error),
+            },
+            'Expressway live request failed — falling back to fixture data.'
+          );
+          return loadMock('upstream_error', 'Expressway live request failed — returning fixture data.');
+        }
+      }
+
+      const forcedMock = ENV.MOCK === 1 && !!apiKey;
+      const status: TrafficBrief['source_status'] = forcedMock ? 'upstream_error' : 'missing_api_key';
+      const note = forcedMock
+        ? 'MOCK=1 flag set — returning fixture expressway data.'
+        : 'Expressway API key missing — returning fixture data.';
+      return loadMock(status, note);
+    });
   }
 }
 
