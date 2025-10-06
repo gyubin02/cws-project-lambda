@@ -101,6 +101,7 @@ app.use('/api/v1/traffic', trafficRoutes);
 app.use('/api/v1/profile', profileRoutes);
 app.use('/api/v1/settings', settingsRoutes);
 app.use('/api/v1/healthz', healthRoutes);
+app.use('/health', healthRoutes);
 
 // 루트 경로
 app.get('/', (_req: any, res: any) => {

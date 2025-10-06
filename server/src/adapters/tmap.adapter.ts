@@ -13,6 +13,8 @@ const CAR_FIXTURE_PATH = path.join(FIXTURE_DIR, 'tmap_car.sample.json');
 const TRANSIT_FIXTURE_PATH = path.join(FIXTURE_DIR, 'tmap_transit.sample.json');
 const GEOCODE_FIXTURE_PATH = path.join(FIXTURE_DIR, 'tmap_geocode.sample.json');
 const TMAP_BASE_URL = (process.env['TMAP_BASE_URL'] ?? '').trim() || 'https://apis.openapi.sk.com/tmap';
+export const GEOCODE_LIVE_FAILURE_PREFIX = 'geocode_failed_live_only:';
+const GEOCODE_ERROR_SNIPPET_MAX = 160;
 
 type CachedMode = Extract<TrafficMode, 'car' | 'transit'>;
 
@@ -310,6 +312,122 @@ function mapTmapGeocode(payload: GeocodePayload, query: string): Coordinates {
   throw new UpstreamError('TMAP geocode response missing coordinates', 'bad_response');
 }
 
+type GeocodeErrorDetails = {
+  status?: number;
+  snippet?: string;
+};
+
+function cleanSnippet(value: unknown): string | undefined {
+  if (value == null) return undefined;
+
+  let text: string;
+  if (typeof value === 'string') {
+    text = value;
+  } else if (typeof value === 'object') {
+    try {
+      text = JSON.stringify(value);
+    } catch (_error) {
+      text = String(value);
+    }
+  } else {
+    text = String(value);
+  }
+
+  text = text.replace(/\s+/g, ' ').trim();
+  if (!text) return undefined;
+  if (text.length > GEOCODE_ERROR_SNIPPET_MAX) {
+    return text.slice(0, GEOCODE_ERROR_SNIPPET_MAX);
+  }
+  return text;
+}
+
+function summarizeGeocodeError(error: unknown): GeocodeErrorDetails {
+  if (error instanceof UpstreamError) {
+    const details: GeocodeErrorDetails = {};
+    if (typeof error.status === 'number') {
+      details.status = error.status;
+    }
+    const snippet = cleanSnippet(error.message);
+    if (snippet) {
+      details.snippet = snippet;
+    }
+    return details;
+  }
+
+  const maybeResponse = (error as any)?.response;
+  const details: GeocodeErrorDetails = {};
+  const status = typeof maybeResponse?.status === 'number' ? (maybeResponse.status as number) : undefined;
+  if (status != null) {
+    details.status = status;
+  }
+  const responseSnippet = cleanSnippet(maybeResponse?.data);
+  const errorMessage = error instanceof Error ? cleanSnippet(error.message) : undefined;
+  const snippet = responseSnippet ?? errorMessage;
+  if (snippet) {
+    details.snippet = snippet;
+  }
+
+  return details;
+}
+
+function createLiveGeocodeError(query: string, details: GeocodeErrorDetails): UpstreamError {
+  const parts: string[] = [`"${query}"`];
+  if (details.status != null) {
+    parts.push(`status ${details.status}`);
+  }
+  if (details.snippet) {
+    parts.push(details.snippet);
+  } else {
+    parts.push('no additional details');
+  }
+
+  const message = `${GEOCODE_LIVE_FAILURE_PREFIX} ${parts.join(' | ')}`;
+  const statusCode = details.status != null && details.status >= 500 ? details.status : 503;
+  const failure = new UpstreamError(message, 'upstream_error', statusCode);
+  return failure;
+}
+
+async function performLiveGeocode(normalizedQuery: string): Promise<Coordinates> {
+  const apiKey = ENV.TMAP_API_KEY;
+  if (!apiKey) {
+    logger.warn({ adapter: 'tmap', op: 'geocode' }, 'TMAP API key missing during live geocode');
+    throw new UpstreamError('TMAP API key missing during live geocode', 'missing_api_key', 503);
+  }
+
+  try {
+    const response = await http.get(`${TMAP_BASE_URL}/geo/fullAddrGeo`, {
+      headers: { appKey: apiKey },
+      params: {
+        fullAddr: normalizedQuery,
+        coordType: 'WGS84GEO',
+        version: 1,
+        addressFlag: 'F02',
+      },
+    });
+
+    return mapTmapGeocode(response.data, normalizedQuery);
+  } catch (error) {
+    const details = summarizeGeocodeError(error);
+
+    logger.warn(
+      {
+        adapter: 'tmap',
+        op: 'geocode',
+        query: normalizedQuery,
+        status: details.status,
+        response: details.snippet,
+      },
+      'TMAP live geocode request failed'
+    );
+
+    const failure = createLiveGeocodeError(normalizedQuery, details);
+    if (error instanceof Error) {
+      (failure as any).cause = error;
+    }
+    throw failure;
+  }
+}
+
 export class TmapAdapter {
   async routeCar(from: Coordinates, to: Coordinates, when?: Date): Promise<TrafficBrief> {
     const cacheKey = buildCacheKey('car', from, to, when);
@@ -412,41 +530,56 @@ export class TmapAdapter {
     const cacheKey = `tmap:geocode:${normalizedQuery.toLowerCase()}`;
     const mode = liveOrMock('tmap');
 
+    const useMock = process.env['MOCK'] === '1' || ENV.MOCK === 1;
+    const failOpen = process.env['FAIL_OPEN'] === '1';
+    const strict = process.env['GEOCODE_STRICT'] === '1';
+    const fallbackAllowed = !strict && (useMock || failOpen);
+
     return cached(cacheKey, async () => {
       const loadMock = async (): Promise<Coordinates> => {
         const data = await readJsonFixture<GeocodePayload>(GEOCODE_FIXTURE_PATH);
         return mapTmapGeocode(data, normalizedQuery);
       };
 
-      if (mode === 'live') {
-        const apiKey = ENV.TMAP_API_KEY;
-        if (!apiKey) {
-          logger.warn({ adapter: 'tmap' }, 'TMAP API key missing during live geocode — using fixture data.');
-          return loadMock();
-        }
-        try {
-          const response = await http.get(`${TMAP_BASE_URL}/geo/fullAddrGeo`, {
-            headers: { appKey: apiKey },
-            params: { address: normalizedQuery, coordType: 'WGS84GEO' },
-          });
-          return mapTmapGeocode(response.data, normalizedQuery);
-        } catch (error) {
-          logger.warn(
-            {
-              adapter: 'tmap',
-              error: error instanceof Error ? error.message : String(error),
-            },
-            'TMAP live geocode failed — falling back to fixture data.'
-          );
-          return loadMock();
-        }
+      if (mode !== 'live' && useMock && !strict) {
+        return loadMock();
       }
 
-      if (ENV.MOCK === 1 && ENV.TMAP_API_KEY) {
-        logger.debug({ adapter: 'tmap' }, 'MOCK=1 flag set — returning fixture geocode data.');
+      try {
+        return await performLiveGeocode(normalizedQuery);
+      } catch (error) {
+        if (!(error instanceof UpstreamError)) {
+          throw error;
+        }
+
+        if (!fallbackAllowed) {
+          throw error;
+        }
+
+        const context = {
+          adapter: 'tmap',
+          op: 'geocode',
+          query: normalizedQuery,
+        } as const;
+
+        if (failOpen) {
+          logger.info(context, 'Fail-open mode enabled — returning fixture geocode data.');
+        } else {
+          logger.info(context, 'MOCK=1 flag active — returning fixture geocode data.');
+        }
+
+        return loadMock();
       }
-      return loadMock();
     });
+  }
+
+  async geocodeLiveOnly(query: string): Promise<Coordinates> {
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) {
+      throw new UpstreamError('Geocode query empty', 'bad_response');
+    }
+
+    return performLiveGeocode(normalizedQuery);
   }
 }
 

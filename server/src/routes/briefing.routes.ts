@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { buildBriefing } from '../services/briefing.service';
 import type { Coordinates, UserLocationSetting } from '../types';
 import { LOCATION_INPUT_MESSAGE, isCoordinateLike, parseCoordinates } from '../lib/util';
-import { tmapAdapter } from '../adapters/tmap.adapter';
+import { GEOCODE_LIVE_FAILURE_PREFIX, tmapAdapter } from '../adapters/tmap.adapter';
 import { getUserSettings } from '../services/settings.service';
 import { liveOrMock } from '../lib/liveOrMock';
 import { UpstreamError } from '../lib/errors';
@@ -70,6 +70,17 @@ async function resolveLocation({
       }
 
       if (error instanceof UpstreamError) {
+        if (typeof error.message === 'string' && error.message.startsWith(GEOCODE_LIVE_FAILURE_PREFIX)) {
+          const message = error.message.slice(GEOCODE_LIVE_FAILURE_PREFIX.length).trim() || LOCATION_INPUT_MESSAGE;
+          const status = error.status ?? 503;
+          return {
+            error: {
+              status,
+              code: 'geocode_failed_live_only',
+              message,
+            },
+          };
+        }
         const status = error.code === 'bad_response' ? 400 : error.status ?? 503;
         const code = error.code === 'bad_response' ? 'location_not_found' : error.code ?? 'upstream_error';
         return {
