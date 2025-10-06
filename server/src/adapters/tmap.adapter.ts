@@ -290,23 +290,21 @@ function mapTmapGeocode(payload: GeocodePayload, query: string): Coordinates {
   const coordinateInfo = payload?.coordinateInfo?.coordinate;
   if (Array.isArray(coordinateInfo) && coordinateInfo.length > 0) {
     const primary = coordinateInfo[0] as Record<string, unknown>;
-    const lat = toNumber(
-      primary?.['lat']
-      ?? primary?.['newLat']
-      ?? primary?.['latEntr']
-      ?? primary?.['newLatEntr']
-      ?? primary?.['noorLat']
-      ?? primary?.['frontLat']
-    );
+    const lat =
+      toNumber(primary?.['lat']) ??
+      toNumber(primary?.['newLat']) ??
+      toNumber(primary?.['latEntr']) ??
+      toNumber(primary?.['newLatEntr']) ??
+      toNumber(primary?.['noorLat']) ??
+      toNumber(primary?.['frontLat']);
 
-    const lon = toNumber(
-      primary?.['lon']
-      ?? primary?.['newLon']
-      ?? primary?.['lonEntr']
-      ?? primary?.['newLonEntr']
-      ?? primary?.['noorLon']
-      ?? primary?.['frontLon']
-    );
+    const lon =
+      toNumber(primary?.['lon']) ??
+      toNumber(primary?.['newLon']) ??
+      toNumber(primary?.['lonEntr']) ??
+      toNumber(primary?.['newLonEntr']) ??
+      toNumber(primary?.['noorLon']) ??
+      toNumber(primary?.['frontLon']);
 
     if (lat != null && lon != null) {
       return { lat, lon };
