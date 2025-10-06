@@ -290,8 +290,24 @@ function mapTmapGeocode(payload: GeocodePayload, query: string): Coordinates {
   const coordinateInfo = payload?.coordinateInfo?.coordinate;
   if (Array.isArray(coordinateInfo) && coordinateInfo.length > 0) {
     const primary = coordinateInfo[0] as Record<string, unknown>;
-    const lat = toNumber(primary?.['lat'] ?? primary?.['newLat'] ?? primary?.['noorLat'] ?? primary?.['frontLat']);
-    const lon = toNumber(primary?.['lon'] ?? primary?.['newLon'] ?? primary?.['noorLon'] ?? primary?.['frontLon']);
+    const lat = toNumber(
+      primary?.['lat']
+      ?? primary?.['newLat']
+      ?? primary?.['latEntr']
+      ?? primary?.['newLatEntr']
+      ?? primary?.['noorLat']
+      ?? primary?.['frontLat']
+    );
+
+    const lon = toNumber(
+      primary?.['lon']
+      ?? primary?.['newLon']
+      ?? primary?.['lonEntr']
+      ?? primary?.['newLonEntr']
+      ?? primary?.['noorLon']
+      ?? primary?.['frontLon']
+    );
+
     if (lat != null && lon != null) {
       return { lat, lon };
     }
@@ -396,14 +412,15 @@ async function performLiveGeocode(normalizedQuery: string): Promise<Coordinates>
 
   try {
     const response = await http.get(`${TMAP_BASE_URL}/geo/fullAddrGeo`, {
-      headers: { appKey: apiKey, Accept: 'application/json' },
+      headers: { Accept: 'application/json' },
       params: {
+        appKey: apiKey,
         fullAddr: normalizedQuery,
         coordType: 'WGS84GEO',
         version: 1,
-        addressFlag: 'F00', // 구주소+도로명 둘 다 허용 → 매칭률↑
+        addressFlag: 'F02',
         page: 1,
-        count: 20,
+        count: 1,
       },
     });
 
