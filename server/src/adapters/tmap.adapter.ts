@@ -412,9 +412,9 @@ async function performLiveGeocode(normalizedQuery: string): Promise<Coordinates>
 
   try {
     const response = await http.get(`${TMAP_BASE_URL}/geo/fullAddrGeo`, {
-      headers: { Accept: 'application/json' },
+      headers: { Accept: 'application/json'},
       params: {
-        appKey: apiKey,
+	appKey: apiKey,
         fullAddr: normalizedQuery,
         coordType: 'WGS84GEO',
         version: 1,
@@ -424,7 +424,12 @@ async function performLiveGeocode(normalizedQuery: string): Promise<Coordinates>
       },
     });
 
+    try {
+      const c0 = response?.data?.coordinateInfo?.coordinate?.[0];
+      logger.info({ op: 'tmap_geocode_debug', sample: c0 }, 'TMAP geocode first candidate');
+    } catch {}
     return mapTmapGeocode(response.data, normalizedQuery);
+  
   } catch (error) {
     const details = summarizeGeocodeError(error);
 
@@ -480,7 +485,7 @@ export class TmapAdapter {
               resCoordType: 'WGS84GEO',
             },
             {
-              headers: { appKey: apiKey },
+              params: { appKey: apiKey, version: 1 },
             }
           );
 
