@@ -1,43 +1,35 @@
 import { cn } from '@/lib/utils';
-import type { CityTraffic } from '@/lib/types/traffic';
+import type { CityRecommendation, TravelMode } from '@/lib/types/traffic';
 
 type RecommendationBannerProps = {
-  city: CityTraffic;
+  mode: TravelMode;
+  recommendation?: CityRecommendation | null;
+  carEtaMinutes?: number | null;
   className?: string;
 };
 
-const DEFAULT_MESSAGE = 'Limited data available. Choose the mode that fits your plans.';
-
-const buildMessage = (city: CityTraffic): string => {
-  const rec = city.recommendation;
-  if (!rec) return DEFAULT_MESSAGE;
-
-  if (rec.mode === 'tie') {
-    if (rec.delta_min != null && Number.isFinite(rec.delta_min)) {
-      return `Similar ETA (±${rec.delta_min} min). Choose based on comfort or cost.`;
-    }
-    return 'Similar ETA. Choose based on comfort or cost.';
-  }
-
-  const delta = rec.delta_min != null && Number.isFinite(rec.delta_min) ? Math.abs(rec.delta_min) : null;
-  const modeLabel = rec.mode === 'car' ? 'Car' : 'Transit';
-  if (delta != null && delta > 0) {
-    return `${modeLabel} is ${delta} min faster. Recommended.`;
-  }
-
-  if (rec.reasons && rec.reasons.includes('transit_unavailable')) {
-    return 'Transit data unavailable right now. Car recommended.';
-  }
-  if (rec.reasons && rec.reasons.includes('car_unavailable')) {
-    return 'Car data unavailable right now. Transit recommended.';
-  }
-
-  return `${modeLabel} route recommended based on current conditions.`;
+const formatDelta = (delta?: number | null): string | null => {
+  if (delta == null || Number.isNaN(delta) || delta === 0) return null;
+  return `${Math.abs(Math.round(delta))} min`;
 };
 
-export function RecommendationBanner({ city, className }: RecommendationBannerProps) {
-  if (!city) return null;
-  const message = buildMessage(city);
+const formatEta = (eta?: number | null): string | null => {
+  if (eta == null || Number.isNaN(eta)) return null;
+  return `${Math.round(eta)} min`;
+};
+
+export function RecommendationBanner({ mode, recommendation, carEtaMinutes, className }: RecommendationBannerProps) {
+  if (mode !== 'transit') return null;
+  if (!recommendation || recommendation.mode !== 'car') return null;
+
+  const deltaText = formatDelta(recommendation.delta_min);
+  const etaText = formatEta(carEtaMinutes);
+
+  const messageParts = [`🚗 Car might be faster${deltaText ? ` (by ${deltaText})` : ''}.`];
+  if (etaText) {
+    messageParts.push(`ETA ≈ ${etaText}.`);
+  }
+
   return (
     <div
       className={cn(
@@ -45,7 +37,7 @@ export function RecommendationBanner({ city, className }: RecommendationBannerPr
         className
       )}
     >
-      {message}
+      {messageParts.join(' ')}
     </div>
   );
 }

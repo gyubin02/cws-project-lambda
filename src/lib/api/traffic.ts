@@ -3,16 +3,19 @@ import type { CarBrief, CityTraffic, TransitBrief } from '../types/traffic';
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 const TRAFFIC_BASE = `${API_BASE_URL.replace(/\/+$/, '')}/traffic`;
 
-type CoordinatePair = [number, number];
+type TrafficQueryParams = {
+  from: string;
+  to: string;
+  at?: string;
+  signal?: AbortSignal;
+};
 
-const toQueryCoords = (coords: CoordinatePair): string => `${coords[0]},${coords[1]}`;
-
-const buildQuery = (params: { from: CoordinatePair; to: CoordinatePair; at?: string }): URLSearchParams => {
+const buildQuery = ({ from, to, at }: TrafficQueryParams): URLSearchParams => {
   const query = new URLSearchParams();
-  query.set('from', toQueryCoords(params.from));
-  query.set('to', toQueryCoords(params.to));
-  if (params.at) {
-    query.set('at', params.at);
+  query.set('from', from);
+  query.set('to', to);
+  if (at) {
+    query.set('at', at);
   }
   return query;
 };
@@ -25,9 +28,10 @@ async function parseJson<T>(res: Response, context: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-export async function fetchCity(params: { from: CoordinatePair; to: CoordinatePair; at?: string }): Promise<CityTraffic> {
-  const query = buildQuery(params);
-  const res = await fetch(`${TRAFFIC_BASE}/city?${query.toString()}`);
+export async function fetchCity(params: TrafficQueryParams): Promise<CityTraffic> {
+  const { signal, ...rest } = params;
+  const query = buildQuery(rest);
+  const res = await fetch(`${TRAFFIC_BASE}/city?${query.toString()}`, { signal });
   const payload = await parseJson<{ ok?: boolean; data?: CityTraffic }>(res, 'City traffic');
   if (payload?.data) {
     return payload.data;
@@ -38,14 +42,16 @@ export async function fetchCity(params: { from: CoordinatePair; to: CoordinatePa
   throw new Error('City traffic response missing data');
 }
 
-export async function fetchCar(params: { from: CoordinatePair; to: CoordinatePair; at?: string }): Promise<CarBrief> {
-  const query = buildQuery(params);
-  const res = await fetch(`${TRAFFIC_BASE}/car?${query.toString()}`);
+export async function fetchCar(params: TrafficQueryParams): Promise<CarBrief> {
+  const { signal, ...rest } = params;
+  const query = buildQuery(rest);
+  const res = await fetch(`${TRAFFIC_BASE}/car?${query.toString()}`, { signal });
   return parseJson<CarBrief>(res, 'Car traffic');
 }
 
-export async function fetchTransit(params: { from: CoordinatePair; to: CoordinatePair; at?: string }): Promise<TransitBrief> {
-  const query = buildQuery(params);
-  const res = await fetch(`${TRAFFIC_BASE}/transit?${query.toString()}`);
+export async function fetchTransit(params: TrafficQueryParams): Promise<TransitBrief> {
+  const { signal, ...rest } = params;
+  const query = buildQuery(rest);
+  const res = await fetch(`${TRAFFIC_BASE}/transit?${query.toString()}`, { signal });
   return parseJson<TransitBrief>(res, 'Transit traffic');
 }

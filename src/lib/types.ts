@@ -76,6 +76,7 @@ export interface Briefing {
 export interface SearchParams {
   from: string;
   to: string;
+  mode?: 'car' | 'transit';
 }
 
 export type LocationSource = 'stored' | 'geocoded' | 'request';
