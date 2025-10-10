@@ -4,7 +4,15 @@ export type AirQualityGrade = 'GOOD' | 'MODERATE' | 'BAD' | 'VERY_BAD';
 
 export type WeatherCondition = 'SUNNY' | 'CLOUDY' | 'RAINY' | 'SNOW' | 'FOG';
 
-export type SourceStatus = 'ok' | 'missing_api_key' | 'upstream_error' | 'timeout' | 'bad_response';
+export type SourceStatus =
+  | 'ok'
+  | 'missing_api_key'
+  | 'upstream_error'
+  | 'timeout'
+  | 'bad_response'
+  | 'mock'
+  | 'degraded'
+  | 'error';
 
 export interface HourlyWeather {
   time: string;

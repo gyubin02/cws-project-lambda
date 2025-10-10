@@ -50,11 +50,16 @@ const Index = () => {
             <h1 className="text-2xl font-bold text-foreground">외출 브리핑</h1>
             <p className="text-sm text-muted-foreground">완벽한 여행을 계획하세요</p>
           </div>
-          <Button asChild variant="ghost" size="icon">
-            <Link to="/settings" aria-label="User settings">
-              <Settings className="h-5 w-5" />
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button asChild variant="outline" size="sm">
+              <Link to="/travel">City Commute</Link>
+            </Button>
+            <Button asChild variant="ghost" size="icon">
+              <Link to="/settings" aria-label="User settings">
+                <Settings className="h-5 w-5" />
+              </Link>
+            </Button>
+          </div>
         </div>
       </header>
 

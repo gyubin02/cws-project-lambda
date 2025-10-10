@@ -5,9 +5,11 @@
 import express from 'express';
 import { z } from 'zod';
 import { trafficService } from '../services/traffic.service';
+import type { RouteTollgatesResult } from '../services/traffic.service';
+import { recommendService } from '../services/recommend.service';
 import { logger } from '../lib/logger';
-import { UpstreamError } from '../lib/errors';
-import type { Coordinates } from '../types';
+import { ENV } from '../lib/env';
+import type { Coordinates, TrafficTollgate } from '../types';
 import { parseCoordOrGeocode, COORDINATE_REGEX, LOCATION_INPUT_MESSAGE } from '../lib/util';
 import { tmapAdapter } from '../adapters/tmap.adapter';
 
@@ -22,6 +24,7 @@ const CityQuerySchema = z.object({
   from: locationSchema,
   to: locationSchema,
   time: z.string().datetime().optional(),
+  at: z.string().datetime().optional(),
 });
 
 const ExpresswayQuerySchema = CityQuerySchema;
@@ -60,13 +63,47 @@ const RouteTollgatesQuerySchema = z
     }
   });
 
+const mapPlazaCongestion = (value?: string | null): TrafficTollgate['congestion'] | undefined => {
+  if (!value) return undefined;
+  const normalized = value.toUpperCase();
+  if (normalized.includes('SMOOTH')) return 'SMOOTH';
+  if (normalized.includes('SLOW') || normalized.includes('MODERATE')) return 'MODERATE';
+  if (normalized.includes('HEAVY') || normalized.includes('CONGEST')) return 'CONGESTED';
+  if (normalized.includes('BLOCK')) return 'BLOCKED';
+  return undefined;
+};
+
+const toCityTollgate = (gate: RouteTollgatesResult['tollgates'][number]): TrafficTollgate => {
+  const tollgate: TrafficTollgate = {
+    code: gate.id,
+    name: gate.name,
+    lat: gate.lat,
+    lon: gate.lon,
+  };
+  const congestion = mapPlazaCongestion(gate.kec?.congestionLevel);
+  if (congestion) {
+    tollgate.congestion = congestion;
+  }
+  if (typeof gate.kec?.speedKph === 'number' && Number.isFinite(gate.kec.speedKph)) {
+    tollgate.speed_kph = Math.round(gate.kec.speedKph);
+  }
+  if (gate.kec?.observedAt) {
+    tollgate.updated_at = gate.kec.observedAt;
+  }
+  if (gate.kec?.source) {
+    tollgate.source = gate.kec.source;
+  }
+  return tollgate;
+};
+
 router.get('/car', async (req: any, res: any) => {
   const parsed = CityQuerySchema.safeParse(req.query);
   if (!parsed.success) {
     return res.status(400).json({ error: 'bad_request', message: LOCATION_INPUT_MESSAGE, issues: parsed.error.issues });
   }
 
-  const { from, to, time } = parsed.data;
+  const { from, to } = parsed.data;
+  const whenValue = parsed.data.at ?? parsed.data.time;
   let fromCoords: Coordinates;
   let toCoords: Coordinates;
   try {
@@ -77,8 +114,8 @@ router.get('/car', async (req: any, res: any) => {
   }
 
   const opts: Parameters<typeof trafficService.getCityTraffic>[2] = { modes: ['car'] };
-  if (time) {
-    opts.when = new Date(time);
+  if (whenValue) {
+    opts.when = new Date(whenValue);
   }
 
   const cityTraffic = await trafficService.getCityTraffic(fromCoords, toCoords, opts);
@@ -97,7 +134,8 @@ router.get('/transit', async (req: any, res: any) => {
     return res.status(400).json({ error: 'bad_request', message: LOCATION_INPUT_MESSAGE, issues: parsed.error.issues });
   }
 
-  const { from, to, time } = parsed.data;
+  const { from, to } = parsed.data;
+  const whenValue = parsed.data.at ?? parsed.data.time;
   let fromCoords: Coordinates;
   let toCoords: Coordinates;
   try {
@@ -108,8 +146,8 @@ router.get('/transit', async (req: any, res: any) => {
   }
 
   const opts: Parameters<typeof trafficService.getCityTraffic>[2] = { modes: ['transit'] };
-  if (time) {
-    opts.when = new Date(time);
+  if (whenValue) {
+    opts.when = new Date(whenValue);
   }
 
   const cityTraffic = await trafficService.getCityTraffic(fromCoords, toCoords, opts);
@@ -122,13 +160,107 @@ router.get('/transit', async (req: any, res: any) => {
   return res.json(cityTraffic.transit);
 });
 
+router.get('/city', async (req: any, res: any) => {
+  const parsed = CityQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({ ok: false, error: 'bad_request', message: LOCATION_INPUT_MESSAGE, issues: parsed.error.issues });
+  }
+
+  const { from, to } = parsed.data;
+  const whenValue = parsed.data.at ?? parsed.data.time;
+  let fromCoords: Coordinates;
+  let toCoords: Coordinates;
+
+  try {
+    fromCoords = await parseCoordOrGeocode(from, (query) => tmapAdapter.geocode(query));
+    toCoords = await parseCoordOrGeocode(to, (query) => tmapAdapter.geocode(query));
+  } catch (error) {
+    return res.status(400).json({
+      ok: false,
+      error: 'bad_request',
+      message: (error as Error).message || LOCATION_INPUT_MESSAGE,
+    });
+  }
+
+  const opts: Parameters<typeof trafficService.getCityTraffic>[2] = { modes: ['car', 'transit'] };
+  if (whenValue) {
+    opts.when = new Date(whenValue);
+  }
+
+  try {
+    const cityTraffic = await trafficService.getCityTraffic(fromCoords, toCoords, opts);
+    const carBrief = cityTraffic.car ?? null;
+    const transitBrief = cityTraffic.transit ?? null;
+
+    let enrichedCar = carBrief ? { ...carBrief, tollgates: Array.isArray(carBrief.tollgates) ? carBrief.tollgates : [] } : null;
+
+    if (carBrief) {
+      let tollgates: TrafficTollgate[] = [];
+      if (carBrief.polyline) {
+        try {
+          const tollgateResult = await trafficService.getRouteTollgates({
+            from: fromCoords,
+            to: toCoords,
+          });
+          tollgates = tollgateResult.tollgates.map(toCityTollgate);
+        } catch (error) {
+          logger.warn(
+            {
+              error: error instanceof Error ? error.message : String(error),
+              from: fromCoords,
+              to: toCoords,
+            },
+            'Failed to attach tollgates to car brief'
+          );
+        }
+      }
+      enrichedCar = { ...carBrief, tollgates };
+    }
+
+    const recommendation = recommendService.pickMode({
+      car: enrichedCar ?? undefined,
+      transit: transitBrief ?? undefined,
+      tieThresholdMin: ENV.ETA_TIE_THRESHOLD_MIN,
+    });
+
+    logger.info(
+      { from: fromCoords, to: toCoords, route: 'city' },
+      'Returned aggregated city traffic'
+    );
+
+    return res.json({
+      ok: true,
+      data: {
+        car: enrichedCar,
+        transit: transitBrief,
+        recommendation,
+      },
+    });
+  } catch (error) {
+    logger.error(
+      {
+        error: error instanceof Error ? error.message : String(error),
+        from: fromCoords,
+        to: toCoords,
+      },
+      'Failed to fetch aggregated city traffic'
+    );
+    return res.status(500).json({
+      ok: false,
+      error: 'city_fetch_failed',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
 router.get('/expressway', async (req: any, res: any) => {
   const parsed = ExpresswayQuerySchema.safeParse(req.query);
   if (!parsed.success) {
     return res.status(400).json({ error: 'bad_request', message: LOCATION_INPUT_MESSAGE, issues: parsed.error.issues });
   }
 
-  const { from, to, time } = parsed.data;
+  const { from, to } = parsed.data;
+  const whenValue = parsed.data.at ?? parsed.data.time;
   let fromCoords: Coordinates;
   let toCoords: Coordinates;
   try {
@@ -139,8 +271,8 @@ router.get('/expressway', async (req: any, res: any) => {
   }
 
   const opts: Parameters<typeof trafficService.getExpresswayTraffic>[2] = {};
-  if (time) {
-    opts.when = new Date(time);
+  if (whenValue) {
+    opts.when = new Date(whenValue);
   }
 
   const expressway = await trafficService.getExpresswayTraffic(fromCoords, toCoords, opts);

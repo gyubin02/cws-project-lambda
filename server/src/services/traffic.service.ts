@@ -86,12 +86,23 @@ export class TrafficService {
     const requested = modes ?? ['car', 'transit'];
     const result: CityTrafficResult = {};
 
-    if (requested.includes('car')) {
-      result.car = await this.callTmap('car', from, to, when);
-    }
+    const needCar = requested.includes('car');
+    const needTransit = requested.includes('transit');
 
-    if (requested.includes('transit')) {
-      result.transit = await this.callTmap('transit', from, to, when);
+    if (needCar && needTransit) {
+      const [car, transit] = await Promise.all([
+        this.callTmap('car', from, to, when),
+        this.callTmap('transit', from, to, when),
+      ]);
+      result.car = car;
+      result.transit = transit;
+    } else {
+      if (needCar) {
+        result.car = await this.callTmap('car', from, to, when);
+      }
+      if (needTransit) {
+        result.transit = await this.callTmap('transit', from, to, when);
+      }
     }
 
     if (requested.includes('walk')) {
