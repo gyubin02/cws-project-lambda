@@ -33,6 +33,40 @@ type NormalizedRoute = {
   segments: NormalizedSegment[];
 };
 
+type Position = [number, number];
+
+type GeoJsonPoint = {
+  type: 'Point';
+  coordinates: Position;
+};
+
+type GeoJsonLineString = {
+  type: 'LineString';
+  coordinates: Position[];
+};
+
+type GeoJsonFeature = {
+  type: 'Feature';
+  geometry: GeoJsonPoint | GeoJsonLineString;
+  properties?: Record<string, unknown> | null;
+};
+
+export type GeoJsonFeatureCollection = {
+  type: 'FeatureCollection';
+  features: GeoJsonFeature[];
+};
+
+export interface GetCarRouteOptions {
+  includeGeometry?: boolean;
+}
+
+type CarRouteFetchResult = {
+  raw: any;
+  normalized: NormalizedRoute;
+  status: TrafficBrief['source_status'];
+  note?: string;
+};
+
 const toNumber = (value: unknown): number | undefined => {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string') {
@@ -160,6 +194,129 @@ function normalizeCarRoute(data: any): NormalizedRoute {
   }
 
   return normalized;
+}
+
+function toPosition(value: unknown): Position | undefined {
+  if (!Array.isArray(value) || value.length < 2) return undefined;
+  const lon = toNumber(value[0]);
+  const lat = toNumber(value[1]);
+  if (lon == null || lat == null) return undefined;
+  return [lon, lat];
+}
+
+function collectCoordinates(value: unknown, output: Position[]): void {
+  if (value == null) return;
+  if (Array.isArray(value)) {
+    const position = toPosition(value);
+    if (position) {
+      output.push(position);
+      return;
+    }
+    for (const item of value) collectCoordinates(item, output);
+    return;
+  }
+  if (typeof value === 'object') {
+    const coords = (value as any)?.coordinates;
+    if (coords) collectCoordinates(coords, output);
+  }
+}
+
+function dedupeSequentialPositions(positions: Position[]): Position[] {
+  const result: Position[] = [];
+  let last: Position | undefined;
+  for (const position of positions) {
+    if (!last || last[0] !== position[0] || last[1] !== position[1]) {
+      result.push(position);
+      last = position;
+    }
+  }
+  return result;
+}
+
+function extractRouteCoordinates(payload: any): Position[] {
+  const coordinates: Position[] = [];
+  const featureGroups = [
+    payload?.features,
+    payload?.featureCollection?.features,
+    payload?.route?.features,
+    payload?.route?.traoptimal?.[0]?.features,
+  ];
+
+  for (const group of featureGroups) {
+    if (!Array.isArray(group)) continue;
+    for (const feature of group) {
+      const geometry = feature?.geometry ?? feature;
+      if (!geometry) continue;
+      const type = typeof geometry.type === 'string' ? geometry.type.toLowerCase() : '';
+      if (type === 'linestring' || type === 'multilinestring') {
+        collectCoordinates(geometry.coordinates, coordinates);
+      }
+    }
+    if (coordinates.length > 0) {
+      return dedupeSequentialPositions(coordinates);
+    }
+  }
+
+  const pathCandidates = [
+    payload?.route?.traoptimal?.[0]?.path,
+    payload?.route?.traoptimal?.[0]?.info?.path,
+    payload?.route?.traoptimal?.[0]?.geometry?.coordinates,
+    payload?.routes?.[0]?.path,
+    payload?.path,
+  ];
+
+  for (const candidate of pathCandidates) {
+    if (!candidate) continue;
+    collectCoordinates(candidate, coordinates);
+    if (coordinates.length > 0) break;
+  }
+
+  return dedupeSequentialPositions(coordinates);
+}
+
+function ensureLineCoordinates(
+  coordinates: Position[],
+  from: Coordinates,
+  to: Coordinates
+): Position[] {
+  if (coordinates.length >= 2) {
+    return coordinates;
+  }
+
+  const result = coordinates.slice();
+  if (result.length === 0) {
+    result.push([from.lon, from.lat]);
+  }
+  result.push([to.lon, to.lat]);
+  return result;
+}
+
+function buildCarRouteGeometry(raw: any, from: Coordinates, to: Coordinates): GeoJsonFeatureCollection {
+  const extracted = extractRouteCoordinates(raw);
+  const lineCoords = ensureLineCoordinates(extracted, from, to);
+
+  const features: GeoJsonFeature[] = [];
+  if (lineCoords.length >= 2) {
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: lineCoords },
+      properties: { role: 'route' },
+    });
+  }
+
+  features.push({
+    type: 'Feature',
+    geometry: { type: 'Point', coordinates: [from.lon, from.lat] },
+    properties: { role: 'origin' },
+  });
+
+  features.push({
+    type: 'Feature',
+    geometry: { type: 'Point', coordinates: [to.lon, to.lat] },
+    properties: { role: 'destination' },
+  });
+
+  return { type: 'FeatureCollection', features };
 }
 
 function normalizeTransitRoute(data: any): NormalizedRoute {
@@ -451,26 +608,31 @@ async function performLiveGeocode(normalizedQuery: string): Promise<Coordinates>
 }
 
 export class TmapAdapter {
-  async routeCar(from: Coordinates, to: Coordinates, when?: Date): Promise<TrafficBrief> {
+  private async fetchCarRouteData(
+    from: Coordinates,
+    to: Coordinates,
+    when?: Date
+  ): Promise<CarRouteFetchResult> {
     const cacheKey = buildCacheKey('car', from, to, when);
     const mode = liveOrMock('tmap');
 
     return cached(cacheKey, async () => {
-      const fixture = async (
+      const loadFixture = async (
         status: TrafficBrief['source_status'],
         note: string
-      ): Promise<TrafficBrief> => {
-        const data = await readJsonFixture(CAR_FIXTURE_PATH);
-        const normalized = normalizeCarRoute(data);
-        return mapNormalizedRoute(normalized, { status, mode: 'car', note });
+      ): Promise<CarRouteFetchResult> => {
+        const raw = await readJsonFixture(CAR_FIXTURE_PATH);
+        const normalized = normalizeCarRoute(raw);
+        return { raw, normalized, status, note };
       };
 
       if (mode === 'live') {
         const apiKey = ENV.TMAP_API_KEY;
         if (!apiKey) {
           logger.warn({ adapter: 'tmap' }, 'TMAP API key missing during live mode — falling back to fixture.');
-          return fixture('missing_api_key', 'TMAP API key missing — returning fixture data.');
+          return loadFixture('missing_api_key', 'TMAP API key missing — returning fixture data.');
         }
+
         try {
           const response = await http.post(
             `${TMAP_BASE_URL}/routes?version=1`,
@@ -487,8 +649,9 @@ export class TmapAdapter {
             }
           );
 
-          const normalized = normalizeCarRoute(response.data);
-          return mapNormalizedRoute(normalized, { status: 'ok', mode: 'car' });
+          const raw = response.data;
+          const normalized = normalizeCarRoute(raw);
+          return { raw, normalized, status: 'ok' };
         } catch (error) {
           logger.warn(
             {
@@ -497,7 +660,7 @@ export class TmapAdapter {
             },
             'TMAP live request failed — falling back to fixture.'
           );
-          return fixture('upstream_error', 'TMAP live request failed — returning fixture data.');
+          return loadFixture('upstream_error', 'TMAP live request failed — returning fixture data.');
         }
       }
 
@@ -506,8 +669,35 @@ export class TmapAdapter {
       const note = forcedMock
         ? 'MOCK=1 flag set — returning fixture data.'
         : 'TMAP API key missing — returning fixture data.';
-      return fixture(status, note);
+      return loadFixture(status, note);
     });
+  }
+
+  async routeCar(from: Coordinates, to: Coordinates, when?: Date): Promise<TrafficBrief> {
+    const result = await this.fetchCarRouteData(from, to, when);
+    const options: MapRouteOptions = { status: result.status, mode: 'car' };
+    if (result.note) {
+      options.note = result.note;
+    }
+    return mapNormalizedRoute(result.normalized, options);
+  }
+
+  async getCarRoute(
+    from: Coordinates,
+    to: Coordinates,
+    options: GetCarRouteOptions = {}
+  ): Promise<NormalizedRoute & { geometry?: GeoJsonFeatureCollection }> {
+    const result = await this.fetchCarRouteData(from, to);
+    const route: NormalizedRoute & { geometry?: GeoJsonFeatureCollection } = {
+      ...result.normalized,
+      segments: result.normalized.segments.slice(),
+    };
+
+    if (options.includeGeometry) {
+      route.geometry = buildCarRouteGeometry(result.raw, from, to);
+    }
+
+    return route;
   }
 
   async routeTransit(from: Coordinates, to: Coordinates, when?: Date): Promise<TrafficBrief> {

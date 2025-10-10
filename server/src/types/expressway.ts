@@ -73,4 +73,6 @@ export type ExpresswayTollgate = {
   name: string;
   lat: number;
   lon: number;
+  routeNo?: string;
+  routeName?: string;
 };

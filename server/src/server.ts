@@ -26,7 +26,7 @@ const adapters: AdapterConfig[] = [
     envVars: ['AIRKOREA_SERVICE_KEY', 'AIRKOREA_API_KEY'],
     hasKey: !!ENV.AIRKOREA_SERVICE_KEY,
   },
-  { adapter: 'expressway', envVars: ['EXPRESSWAY_API_KEY'], hasKey: !!ENV.EXPRESSWAY_API_KEY },
+  { adapter: 'expressway', envVars: ['EXPRESSWAY_API_KEY', 'KEC_API_KEY'], hasKey: !!ENV.EXPRESSWAY_API_KEY },
 ];
 
 if (shouldStart) {

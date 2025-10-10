@@ -5,7 +5,79 @@
 import { Coordinates } from '../types';
 import { UpstreamError } from './errors';
 import tollgateCatalog from '../../data/expressway_tollgates.json';
-import type { ExpresswayTollgate } from '../types';
+
+export interface Tollgate {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  routeNo?: string;
+  routeName?: string;
+}
+
+export interface MatchedTollgate extends Tollgate {
+  distanceFromRouteMeters: number;
+  progressRatio: number;
+}
+
+const EARTH_RADIUS_METERS = 6371_000;
+
+const toNumber = (value: unknown): number | undefined => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    const parsed = Number(trimmed);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  return undefined;
+};
+
+const toTollgate = (value: unknown): Tollgate | undefined => {
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  const idRaw = record['id'];
+  const id = typeof idRaw === 'string' ? idRaw.trim() : undefined;
+  const nameRaw = record['name'];
+  const name = typeof nameRaw === 'string' ? nameRaw.trim() : undefined;
+  const lat = toNumber(record['lat']);
+  const lon = toNumber(record['lon']);
+  if (!id || !name || lat == null || lon == null) return undefined;
+  const gate: Tollgate = { id, name, lat, lon };
+  const routeNoRaw = record['routeNo'];
+  const routeNameRaw = record['routeName'];
+  const routeNo = typeof routeNoRaw === 'string' ? routeNoRaw.trim() : undefined;
+  const routeName = typeof routeNameRaw === 'string' ? routeNameRaw.trim() : undefined;
+  if (routeNo) gate.routeNo = routeNo;
+  if (routeName) gate.routeName = routeName;
+  return gate;
+};
+
+export function normalizeTollgateDataset(raw: unknown): Tollgate[] {
+  const entries = (() => {
+    if (Array.isArray(raw)) return raw;
+    if (raw && typeof raw === 'object' && Array.isArray((raw as any).tollgates)) {
+      return (raw as any).tollgates as unknown[];
+    }
+    return [];
+  })();
+
+  const deduped = new Map<string, Tollgate>();
+  for (const item of entries) {
+    const gate = toTollgate(item);
+    if (!gate) continue;
+    const existing = deduped.get(gate.id);
+    if (!existing) {
+      deduped.set(gate.id, gate);
+      continue;
+    }
+    // Preserve the first entry but merge optional metadata if missing.
+    if (!existing.routeNo && gate.routeNo) existing.routeNo = gate.routeNo;
+    if (!existing.routeName && gate.routeName) existing.routeName = gate.routeName;
+  }
+
+  return Array.from(deduped.values());
+}
 
 /**
  * 두 좌표 간의 거리 계산 (Haversine 공식)
@@ -22,9 +94,16 @@ export function calculateDistance(from: Coordinates, to: Coordinates): number {
   return R * c;
 }
 
-const tollgates: ExpresswayTollgate[] = tollgateCatalog as ExpresswayTollgate[];
+const tollgates: Tollgate[] = (() => {
+  try {
+    return normalizeTollgateDataset(tollgateCatalog as unknown);
+  } catch (error) {
+    console.warn('Failed to normalize tollgate dataset:', error);
+    return [];
+  }
+})();
 
-export function nearestTollgate(lat: number, lon: number): ExpresswayTollgate {
+export function nearestTollgate(lat: number, lon: number): Tollgate {
   if (tollgates.length === 0) {
     throw new Error('expressway tollgate catalog is empty');
   }
@@ -242,4 +321,216 @@ export function mapWeatherCondition(pty: number, sky: number): string {
  */
 export function normalizePop(pop: number): number {
   return Math.max(0, Math.min(1, pop / 100));
+}
+
+function toRadians(deg: number): number {
+  return (deg * Math.PI) / 180;
+}
+
+export function haversineMeters(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
+  const dLat = toRadians(b.lat - a.lat);
+  const dLon = toRadians(b.lon - a.lon);
+  const lat1 = toRadians(a.lat);
+  const lat2 = toRadians(b.lat);
+
+  const sinLat = Math.sin(dLat / 2);
+  const sinLon = Math.sin(dLon / 2);
+  const h = sinLat * sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLon * sinLon;
+  return 2 * EARTH_RADIUS_METERS * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+type RoutePoint = { lat: number; lon: number };
+
+function projectToLocalMeters(origin: RoutePoint, target: RoutePoint): { x: number; y: number } {
+  const lat0 = toRadians(origin.lat);
+  const lon0 = toRadians(origin.lon);
+  const lat = toRadians(target.lat);
+  const lon = toRadians(target.lon);
+  const x = (lon - lon0) * Math.cos(lat0) * EARTH_RADIUS_METERS;
+  const y = (lat - lat0) * EARTH_RADIUS_METERS;
+  return { x, y };
+}
+
+function projectPointOnSegment(
+  p: RoutePoint,
+  a: RoutePoint,
+  b: RoutePoint
+): { distance: number; t: number } {
+  const aProj = projectToLocalMeters(p, a);
+  const bProj = projectToLocalMeters(p, b);
+
+  const dx = bProj.x - aProj.x;
+  const dy = bProj.y - aProj.y;
+  const lengthSq = dx * dx + dy * dy;
+
+  if (lengthSq === 0) {
+    const distance = Math.hypot(aProj.x, aProj.y);
+    return { distance, t: 0 };
+  }
+
+  const dot = (-aProj.x) * dx + (-aProj.y) * dy;
+  let t = dot / lengthSq;
+  if (t < 0) t = 0;
+  else if (t > 1) t = 1;
+
+  const closestX = aProj.x + t * dx;
+  const closestY = aProj.y + t * dy;
+  const distance = Math.hypot(closestX, closestY);
+  return { distance, t };
+}
+
+export function pointToSegmentDistanceMeters(
+  p: RoutePoint,
+  a: RoutePoint,
+  b: RoutePoint
+): number {
+  return projectPointOnSegment(p, a, b).distance;
+}
+
+export function pointToPolylineDistanceMeters(
+  p: RoutePoint,
+  line: RoutePoint[]
+): { distance: number; atIndex: number } {
+  if (!Array.isArray(line) || line.length === 0) {
+    return { distance: Number.POSITIVE_INFINITY, atIndex: -1 };
+  }
+
+  if (line.length === 1) {
+    return { distance: haversineMeters(p, line[0]!), atIndex: 0 };
+  }
+
+  let minDistance = Number.POSITIVE_INFINITY;
+  let bestIndex = 0;
+
+  for (let i = 0; i < line.length - 1; i += 1) {
+    const distance = pointToSegmentDistanceMeters(p, line[i]!, line[i + 1]!);
+    if (distance < minDistance) {
+      minDistance = distance;
+      bestIndex = i;
+    }
+  }
+
+  return { distance: minDistance, atIndex: bestIndex };
+}
+
+type RouteSegments = {
+  segments: Array<{ start: RoutePoint; end: RoutePoint; length: number }>;
+  prefixMeters: number[];
+  totalLength: number;
+};
+
+function prepareRoute(line: RoutePoint[]): RouteSegments {
+  const segments: RouteSegments['segments'] = [];
+  const prefixMeters: number[] = [];
+  let total = 0;
+
+  for (let i = 0; i < line.length - 1; i += 1) {
+    const start = line[i]!;
+    const end = line[i + 1]!;
+    const length = haversineMeters(start, end);
+    segments.push({ start, end, length });
+    prefixMeters.push(total);
+    total += length;
+  }
+
+  return { segments, prefixMeters, totalLength: total };
+}
+
+type RouteProjection = {
+  distance: number;
+  segmentIndex: number;
+  t: number;
+  progressMeters: number;
+};
+
+function projectPointOntoRoute(line: RoutePoint[], prepared: RouteSegments, point: RoutePoint): RouteProjection {
+  if (line.length === 0) {
+    return { distance: Number.POSITIVE_INFINITY, segmentIndex: -1, t: 0, progressMeters: 0 };
+  }
+
+  if (prepared.segments.length === 0) {
+    const distance = haversineMeters(point, line[0]!);
+    return { distance, segmentIndex: 0, t: 0, progressMeters: 0 };
+  }
+
+  let minDistance = Number.POSITIVE_INFINITY;
+  let bestIndex = 0;
+  let bestT = 0;
+
+  for (let i = 0; i < prepared.segments.length; i += 1) {
+    const segment = prepared.segments[i]!;
+    const projection = projectPointOnSegment(point, segment.start, segment.end);
+    if (projection.distance < minDistance) {
+      minDistance = projection.distance;
+      bestIndex = i;
+      bestT = projection.t;
+    }
+  }
+
+  const progressMeters = prepared.prefixMeters[bestIndex]! + prepared.segments[bestIndex]!.length * bestT;
+  return { distance: minDistance, segmentIndex: bestIndex, t: bestT, progressMeters };
+}
+
+export function sortByRouteProgress(line: RoutePoint[], candidates: RoutePoint[]): number[] {
+  if (!Array.isArray(line) || line.length === 0) {
+    return candidates.map((_value, index) => index);
+  }
+
+  const prepared = prepareRoute(line);
+  const total = prepared.totalLength > 0 ? prepared.totalLength : 1;
+
+  return candidates
+    .map((point, index) => {
+      const projection = projectPointOntoRoute(line, prepared, point);
+      const ratio = Math.max(0, Math.min(1, projection.progressMeters / total));
+      return { index, ratio };
+    })
+    .sort((a, b) => a.ratio - b.ratio)
+    .map((entry) => entry.index);
+}
+
+export function tollgatesAlongRoute(
+  line: RoutePoint[],
+  tollgateList: Tollgate[],
+  bufferMeters = 200,
+  max = 12
+): MatchedTollgate[] {
+  if (!Array.isArray(line) || line.length === 0 || !Array.isArray(tollgateList) || tollgateList.length === 0) {
+    return [];
+  }
+
+  const prepared = prepareRoute(line);
+  const total = prepared.totalLength > 0 ? prepared.totalLength : 1;
+  const dedupe = new Map<string, MatchedTollgate>();
+
+  for (const tollgate of tollgateList) {
+    const projection = projectPointOntoRoute(line, prepared, tollgate);
+    if (!Number.isFinite(projection.distance) || projection.distance > bufferMeters) {
+      continue;
+    }
+
+    const progressRatio = Math.max(0, Math.min(1, projection.progressMeters / total));
+    const distanceMeters = Number.isFinite(projection.distance) ? projection.distance : Number.POSITIVE_INFINITY;
+    const candidate: MatchedTollgate = {
+      ...tollgate,
+      distanceFromRouteMeters: distanceMeters,
+      progressRatio,
+    };
+
+    const existing = dedupe.get(tollgate.id);
+    if (!existing || distanceMeters < existing.distanceFromRouteMeters) {
+      dedupe.set(tollgate.id, candidate);
+    }
+  }
+
+  const limit = Number.isFinite(max) && max > 0 ? Math.floor(max) : tollgateList.length;
+
+  return Array.from(dedupe.values())
+    .sort((a, b) => {
+      if (a.progressRatio === b.progressRatio) {
+        return a.distanceFromRouteMeters - b.distanceFromRouteMeters;
+      }
+      return a.progressRatio - b.progressRatio;
+    })
+    .slice(0, limit);
 }

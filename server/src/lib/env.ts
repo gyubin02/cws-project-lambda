@@ -17,5 +17,5 @@ export const ENV: Env = {
   TMAP_API_KEY: pick(process.env['TMAP_API_KEY']),
   KMA_SERVICE_KEY: pick(process.env['KMA_SERVICE_KEY'], process.env['KMA_API_KEY']),
   AIRKOREA_SERVICE_KEY: pick(process.env['AIRKOREA_SERVICE_KEY'], process.env['AIRKOREA_API_KEY']),
-  EXPRESSWAY_API_KEY: pick(process.env['EXPRESSWAY_API_KEY']),
+  EXPRESSWAY_API_KEY: pick(process.env['EXPRESSWAY_API_KEY'], process.env['KEC_API_KEY']),
 };
