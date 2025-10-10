@@ -2,11 +2,21 @@
  * 교통 서비스 (TMAP + Expressway)
  */
 
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { TmapAdapter } from '../adapters/tmap.adapter';
+import type { GeoJsonFeatureCollection } from '../adapters/tmap.adapter';
 import { ExpresswayAdapter } from '../adapters/expressway.adapter';
+import type { PlazaTraffic } from '../adapters/expressway.adapter';
 import { logger } from '../lib/logger';
 import { UpstreamError } from '../lib/errors';
-import { calculateDistance, nearestTollgate } from '../lib/util';
+import {
+  calculateDistance,
+  nearestTollgate,
+  tollgatesAlongRoute,
+  normalizeTollgateDataset,
+} from '../lib/util';
+import type { MatchedTollgate, Tollgate } from '../lib/util';
 import type { Coordinates, TrafficBrief, TrafficMode } from '../types';
 import type { SourceStatus } from '../lib/errors';
 
@@ -22,9 +32,45 @@ type ExpresswayTrafficResult = {
   meta?: { fromToll: string; toToll: string };
 };
 
+type AddressRouteParams = {
+  fromAddr: string;
+  toAddr: string;
+  bufferMeters?: number;
+  maxTollgates?: number;
+};
+
+type CoordinateRouteParams = {
+  from: Coordinates;
+  to: Coordinates;
+  bufferMeters?: number;
+  maxTollgates?: number;
+};
+
+export type RouteTollgatesParams = AddressRouteParams | CoordinateRouteParams;
+
+type EnrichedTollgate = MatchedTollgate & { kec: PlazaTraffic | null };
+
+export type RouteTollgatesResult = {
+  ok: boolean;
+  route: {
+    distanceMeters?: number;
+    durationSeconds?: number;
+    geometry?: GeoJsonFeatureCollection;
+  };
+  tollgates: EnrichedTollgate[];
+  fallback: {
+    used: boolean;
+    reason: string | null;
+    legacy?: ExpresswayTrafficResult;
+  };
+};
+
+const TOLLGATE_DATA_PATH = path.resolve(__dirname, '../../data/expressway_tollgates.json');
+
 export class TrafficService {
   private readonly tmap: TmapAdapter;
   private readonly expressway: ExpresswayAdapter;
+  private tollgateDatasetPromise?: Promise<Tollgate[]>;
 
   constructor() {
     this.tmap = new TmapAdapter();
@@ -87,6 +133,89 @@ export class TrafficService {
         meta: { fromToll: fromToll.id, toToll: toToll.id },
       };
     }
+
+  }
+
+  async getRouteTollgates(params: RouteTollgatesParams): Promise<RouteTollgatesResult> {
+    const bufferValue = params.bufferMeters ?? 200;
+    const maxValue = params.maxTollgates ?? 12;
+    const bufferMeters = Number.isFinite(bufferValue) ? Math.max(0, Number(bufferValue)) : 200;
+    const maxTollgates = Number.isFinite(maxValue) ? Math.max(0, Math.floor(Number(maxValue))) : 12;
+
+    let from: Coordinates;
+    let to: Coordinates;
+
+    if ('fromAddr' in params) {
+      from = await this.tmap.geocode(params.fromAddr);
+      to = await this.tmap.geocode(params.toAddr);
+    } else {
+      from = params.from;
+      to = params.to;
+    }
+
+    const carRoute = await this.tmap.getCarRoute(from, to, { includeGeometry: true });
+    const line = this.extractRouteLine(carRoute.geometry, from, to);
+    const tollgateDataset = await this.loadTollgates();
+
+    let fallbackReason: string | null = null;
+    let matched: MatchedTollgate[] = [];
+
+    if (!tollgateDataset.length) {
+      fallbackReason = 'tollgate_dataset_empty';
+    } else if (maxTollgates === 0) {
+      matched = [];
+    } else {
+      matched = tollgatesAlongRoute(line, tollgateDataset, bufferMeters, maxTollgates);
+      if (!matched.length) {
+        fallbackReason = 'no_tollgates_matched';
+      }
+    }
+
+    const toKec = async (tollgate: MatchedTollgate): Promise<EnrichedTollgate> => {
+      const getFallback = (): PlazaTraffic => ({ observedAt: new Date().toISOString(), source: 'kec_unavailable' });
+      let plaza = await this.expressway.getPlazaTraffic(tollgate.id);
+      if (!plaza) {
+        plaza = getFallback();
+      }
+
+      return {
+        ...tollgate,
+        distanceFromRouteMeters: Math.round(tollgate.distanceFromRouteMeters),
+        progressRatio: Number(tollgate.progressRatio.toFixed(4)),
+        kec: plaza,
+      };
+    };
+
+    const enriched = await Promise.all(matched.map((item) => toKec(item)));
+
+    const routeSummary: RouteTollgatesResult['route'] = {};
+    if (typeof carRoute.distanceMeters === 'number') {
+      routeSummary.distanceMeters = carRoute.distanceMeters;
+    }
+    if (typeof carRoute.durationSeconds === 'number') {
+      routeSummary.durationSeconds = carRoute.durationSeconds;
+    }
+    if (carRoute.geometry) {
+      routeSummary.geometry = carRoute.geometry;
+    }
+
+    const result: RouteTollgatesResult = {
+      ok: true,
+      route: routeSummary,
+      tollgates: enriched,
+      fallback: { used: false, reason: null },
+    };
+
+    if (fallbackReason) {
+      const legacy = await this.getExpresswayTraffic(from, to);
+      result.fallback = {
+        used: true,
+        reason: fallbackReason,
+        legacy,
+      };
+    }
+
+    return result;
   }
 
   private async callTmap(
@@ -145,6 +274,71 @@ export class TrafficService {
       mode,
       notes: [note],
     };
+  }
+
+  private async loadTollgates(): Promise<Tollgate[]> {
+    if (!this.tollgateDatasetPromise) {
+      this.tollgateDatasetPromise = (async () => {
+        try {
+          const file = await fs.readFile(TOLLGATE_DATA_PATH, 'utf8');
+          const parsed = JSON.parse(file);
+          const dataset = normalizeTollgateDataset(parsed);
+          if (!dataset.length) {
+            logger.warn({ path: TOLLGATE_DATA_PATH }, 'Tollgate dataset loaded but empty');
+          }
+          return dataset;
+        } catch (error) {
+          logger.error(
+            {
+              error: error instanceof Error ? error.message : String(error),
+              path: TOLLGATE_DATA_PATH,
+            },
+            'Failed to load tollgate dataset'
+          );
+          return [];
+        }
+      })();
+    }
+    return this.tollgateDatasetPromise;
+  }
+
+  private extractRouteLine(
+    geometry: GeoJsonFeatureCollection | undefined,
+    from: Coordinates,
+    to: Coordinates
+  ): Coordinates[] {
+    const defaultLine: Coordinates[] = [from, to];
+    if (!geometry) {
+      return defaultLine;
+    }
+
+    const lineFeature = geometry.features.find(
+      (feature) => feature.geometry && (feature.geometry as any).type === 'LineString'
+    );
+
+    if (!lineFeature) {
+      return defaultLine;
+    }
+
+    const coords = (lineFeature.geometry as any)?.coordinates;
+    if (!Array.isArray(coords)) {
+      return defaultLine;
+    }
+
+    const points: Coordinates[] = [];
+    for (const pair of coords) {
+      if (!Array.isArray(pair) || pair.length < 2) continue;
+      const lon = Number(pair[0]);
+      const lat = Number(pair[1]);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+      points.push({ lat, lon });
+    }
+
+    if (points.length < 2) {
+      return defaultLine;
+    }
+
+    return points;
   }
 }
 

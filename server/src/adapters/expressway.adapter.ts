@@ -76,6 +76,20 @@ type MapOptions = {
   note?: string;
 };
 
+export interface PlazaTraffic {
+  observedAt: string;
+  trafficVolume?: number;
+  speedKph?: number;
+  congestionLevel?: 'SMOOTH' | 'SLOW' | 'HEAVY' | 'BLOCKED';
+  source: string;
+}
+
+const PLAZA_TIMEOUT_MS = toNumber(process.env['EXPRESSWAY_PLAZA_TIMEOUT_MS']) ?? 3500;
+const PLAZA_CACHE_TTL_MS = toNumber(process.env['EXPRESSWAY_PLAZA_TTL_MS']) ?? 45_000;
+
+type PlazaCacheEntry = { value: PlazaTraffic; expiresAt: number };
+const plazaCache = new Map<string, PlazaCacheEntry>();
+
 const extractRecords = (payload: any): ExpresswayRecord[] => {
   if (Array.isArray(payload?.response?.body?.items?.item)) {
     return payload.response.body.items.item as ExpresswayRecord[];
@@ -102,6 +116,78 @@ const pickLatestRecord = (records: ExpresswayRecord[]): ExpresswayRecord | undef
     const latestStamp = `${latest?.stndDate ?? ''}${latest?.stndHour ?? ''}${latest?.stndMin ?? ''}${latest?.regDate ?? ''}`;
     return currentStamp > latestStamp ? current : latest;
   }, records[0]);
+};
+
+const extractPlazaRecords = (payload: any): any[] => {
+  if (Array.isArray(payload?.response?.body?.items?.item)) {
+    return payload.response.body.items.item as any[];
+  }
+  if (Array.isArray(payload?.list)) {
+    return payload.list as any[];
+  }
+  if (Array.isArray(payload?.items)) {
+    return payload.items as any[];
+  }
+  if (Array.isArray(payload?.data)) {
+    return payload.data as any[];
+  }
+  if (Array.isArray(payload)) {
+    return payload as any[];
+  }
+  return [];
+};
+
+const parsePlazaCongestion = (value: unknown): PlazaTraffic['congestionLevel'] | undefined => {
+  if (typeof value === 'string') {
+    const normalized = value.trim().toUpperCase();
+    if (!normalized) return undefined;
+    if (normalized.includes('BLOCK')) return 'BLOCKED';
+    if (normalized.includes('HEAVY') || normalized.includes('CONGEST') || normalized.includes('HIGH')) return 'HEAVY';
+    if (normalized.includes('SLOW') || normalized.includes('MID')) return 'SLOW';
+    if (normalized.includes('SMOOTH') || normalized.includes('LOW') || normalized.includes('FREE')) return 'SMOOTH';
+  } else if (typeof value === 'number') {
+    if (value >= 4) return 'BLOCKED';
+    if (value >= 3) return 'HEAVY';
+    if (value >= 2) return 'SLOW';
+    if (value >= 0) return 'SMOOTH';
+  }
+  return undefined;
+};
+
+const buildUnavailablePlazaTraffic = (): PlazaTraffic => ({
+  observedAt: new Date().toISOString(),
+  source: 'kec_unavailable',
+});
+
+const mapPlazaTraffic = (payload: any): PlazaTraffic | null => {
+  const records = extractPlazaRecords(payload);
+  if (!records.length) return null;
+  const primary = records[0] ?? {};
+
+  const observedAt =
+    composeObservedAt(primary.stndDate ?? primary.obsrDate ?? primary.date, primary.stndHour ?? primary.obsrHour ?? primary.hour, primary.stndMin ?? primary.obsrMin ?? primary.minute) ??
+    new Date().toISOString();
+
+  const volume = toNumber(primary.trafficVolume ?? primary.trafficAmount ?? primary.trafficAmout ?? primary.traffic ?? primary.tfcVol);
+  const speed = toNumber(primary.speed ?? primary.avgSpeed ?? primary.trafficSpd ?? primary.speedAvg);
+  const congestion = parsePlazaCongestion(primary.congestionLevel ?? primary.trafficIdx ?? primary.trafficStatus ?? primary.congestion);
+
+  const traffic: PlazaTraffic = {
+    observedAt,
+    source: 'kec_plaza_api',
+  };
+
+  if (volume != null) {
+    traffic.trafficVolume = Math.round(volume);
+  }
+  if (speed != null) {
+    traffic.speedKph = Math.round(speed);
+  }
+  if (congestion) {
+    traffic.congestionLevel = congestion;
+  }
+
+  return traffic;
 };
 
 const mapExpressway = (payload: any, opts: MapOptions): TrafficBrief => {
@@ -213,6 +299,68 @@ export class ExpresswayAdapter {
         : 'Expressway API key missing — returning fixture data.';
       return loadMock(status, note);
     });
+  }
+
+  async getPlazaTraffic(plazaId: string): Promise<PlazaTraffic | null> {
+    if (!plazaId) return null;
+
+    const modeKey = ENV.MOCK === 1 ? 'mock' : 'live';
+    const cacheKey = `${plazaId}:${modeKey}`;
+    const entry = plazaCache.get(cacheKey);
+    const now = Date.now();
+    if (entry && entry.expiresAt > now) {
+      return entry.value;
+    }
+
+    const cacheValue = (value: PlazaTraffic): PlazaTraffic => {
+      const ttl = Math.max(1_000, PLAZA_CACHE_TTL_MS);
+      plazaCache.set(cacheKey, { value, expiresAt: Date.now() + ttl });
+      return value;
+    };
+
+    if (ENV.MOCK === 1) {
+      return cacheValue({
+        observedAt: new Date().toISOString(),
+        trafficVolume: 1100,
+        speedKph: 85,
+        congestionLevel: 'SMOOTH',
+        source: 'mock',
+      });
+    }
+
+    const apiKey = ENV.EXPRESSWAY_API_KEY;
+    if (!apiKey) {
+      return cacheValue(buildUnavailablePlazaTraffic());
+    }
+
+    try {
+      const response = await http.get(`${EXPRESSWAY_BASE_URL}/realTimePlazaTraffic`, {
+        params: {
+          key: apiKey,
+          type: 'json',
+          unitCode: plazaId,
+          plazaId,
+        },
+        timeout: PLAZA_TIMEOUT_MS,
+      });
+
+      const mapped = mapPlazaTraffic(response.data);
+      if (mapped) {
+        return cacheValue(mapped);
+      }
+
+      return cacheValue(buildUnavailablePlazaTraffic());
+    } catch (error) {
+      logger.warn(
+        {
+          adapter: 'expressway',
+          plazaId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        'Expressway plaza traffic request failed'
+      );
+      return cacheValue(buildUnavailablePlazaTraffic());
+    }
   }
 }
 
