@@ -10,8 +10,19 @@ import {
   Weather,
   WeatherCondition,
 } from './types';
+import type { CarBrief, CityRecommendation, TransitBrief } from './types/traffic';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
+
+export type BriefingTrafficModes = {
+  car?: CarBrief | null;
+  transit?: TransitBrief | null;
+};
+
+export type BriefingWithModes = Briefing & {
+  traffic_modes?: BriefingTrafficModes | null;
+  recommendation?: CityRecommendation | null;
+};
 
 type ServerTrafficStep = {
   type?: TrafficStep['type'];
@@ -65,7 +76,9 @@ type ServerBriefing = {
     car?: ServerTrafficBrief | null;
     expressway?: ServerTrafficBrief | null;
     transit?: ServerTrafficBrief | null;
+    recommendation?: CityRecommendation | null;
   } | null;
+  recommendation?: CityRecommendation | null;
 };
 
 type ServerBriefingMeta = {
@@ -111,7 +124,7 @@ function normalizeLocationSource(value?: string | null): LocationSource | undefi
   return undefined;
 }
 
-function normalizeBriefing(server: ServerBriefing | null, meta?: ServerBriefingMeta | null): Briefing {
+function normalizeBriefing(server: ServerBriefing | null, meta?: ServerBriefingMeta | null): BriefingWithModes {
   if (!server) {
     return {
       summary: '',
@@ -119,8 +132,18 @@ function normalizeBriefing(server: ServerBriefing | null, meta?: ServerBriefingM
     };
   }
 
+  // Pull through both modes from /briefing as provided by the server
+  const car = (server.traffic?.car ?? null) as CarBrief | null;
+  const transit = (server.traffic?.transit ?? null) as TransitBrief | null;
+
+  // Server may include recommendation either under server.traffic or top-level; prefer traffic-level
+  const recommendation = (server.traffic && 'recommendation' in server.traffic)
+    ? ((server.traffic as unknown as { recommendation?: CityRecommendation | null }).recommendation ?? null)
+    : ((server as unknown as { recommendation?: CityRecommendation | null }).recommendation ?? null);
+
+  // Keep legacy single-pick for backward compatibility (old TrafficCard consumers)
   const pickTraffic =
-    server.traffic?.car ?? server.traffic?.expressway ?? server.traffic?.transit ?? null;
+    car ?? server.traffic?.expressway ?? transit ?? null;
 
   const traffic: TrafficInfo = {
     source: pickTraffic?.source ?? 'expressway',
@@ -165,11 +188,11 @@ function normalizeBriefing(server: ServerBriefing | null, meta?: ServerBriefingM
         pm10: server.air.pm10,
         pm25: server.air.pm25,
         aqi: server.air.aqi,
-        note: server.air.notes?.[0],
+    note: server.air.notes?.[0],
       }
     : undefined;
 
-  const briefing: Briefing = {
+  const briefing: BriefingWithModes = {
     summary: server.summary ?? '',
     notices: server.notices ?? [],
     from: server.from ?? undefined,
@@ -177,6 +200,8 @@ function normalizeBriefing(server: ServerBriefing | null, meta?: ServerBriefingM
     weather,
     air,
     traffic,
+    traffic_modes: { car, transit },
+    recommendation: recommendation ?? null,
   };
 
   const originSource = normalizeLocationSource(meta?.origin?.source ?? undefined);
@@ -201,7 +226,7 @@ function normalizeBriefing(server: ServerBriefing | null, meta?: ServerBriefingM
   return briefing;
 }
 
-export async function getBriefing(params: SearchParams): Promise<Briefing> {
+export async function getBriefing(params: SearchParams): Promise<BriefingWithModes> {
   const qs = new URLSearchParams();
   if (params.from) qs.set('from', params.from);
   if (params.to) qs.set('to', params.to);

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -11,15 +11,31 @@ import { AirQualityDetailModal } from '@/components/AirQualityDetailModal';
 import { TrafficDetailModal } from '@/components/TrafficDetailModal';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
-import { getBriefing } from '@/lib/api';
-import { Briefing, SearchParams } from '@/lib/types';
+import { RecommendationBanner } from '@/components/travel/RecommendationBanner';
+import { EtaCompareCard } from '@/components/travel/EtaCompareCard';
+import { TollgatePanel } from '@/components/travel/TollgatePanel';
+import { ModeSelector } from '@/components/travel/ModeSelector';
+import { getBriefing, type BriefingWithModes } from '@/lib/api';
+import { SearchParams } from '@/lib/types';
+import type { TravelMode } from '@/lib/types/traffic';
 
 const Index = () => {
-  const [briefing, setBriefing] = useState<Briefing | null>(null);
+  const [briefing, setBriefing] = useState<BriefingWithModes | null>(null);
   const [loading, setLoading] = useState(false);
   const [weatherModalOpen, setWeatherModalOpen] = useState(false);
   const [airModalOpen, setAirModalOpen] = useState(false);
   const [trafficModalOpen, setTrafficModalOpen] = useState(false);
+  const [selectedMode, setSelectedMode] = useState<TravelMode>(() => {
+    if (typeof window === 'undefined') {
+      return 'car';
+    }
+    try {
+      const url = new URL(window.location.href);
+      return url.searchParams.get('mode') === 'transit' ? 'transit' : 'car';
+    } catch {
+      return 'car';
+    }
+  });
 
   const sourceLabels: Record<string, string> = {
     stored: '저장 좌표',
@@ -27,8 +43,37 @@ const Index = () => {
     request: '요청값',
   };
 
+  const syncModeToUrl = (mode: TravelMode) => {
+    if (typeof window === 'undefined') return;
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.set('mode', mode);
+    window.history.replaceState(null, '', `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
+  };
+
+  const handleModeChange = (mode: TravelMode) => {
+    if (mode === selectedMode) return;
+    setSelectedMode(mode);
+    syncModeToUrl(mode);
+  };
+
+  const car = useMemo(() => briefing?.traffic_modes?.car ?? null, [briefing]);
+  const transit = useMemo(() => briefing?.traffic_modes?.transit ?? null, [briefing]);
+  const recommendation = useMemo(() => briefing?.recommendation ?? null, [briefing]);
+  const recommendedMode = recommendation?.mode ?? null;
+  const showRecommendationBanner =
+    recommendedMode !== null && recommendedMode !== 'tie' && recommendedMode !== selectedMode;
+  const bannerRecommendedMode = showRecommendationBanner
+    ? (recommendedMode as TravelMode)
+    : null;
+  const hasDualTraffic = Boolean(car || transit);
+
   const handleSearch = async (params: SearchParams) => {
     setLoading(true);
+    if (params.mode) {
+      setSelectedMode(params.mode);
+      syncModeToUrl(params.mode);
+    }
+    setTrafficModalOpen(false);
     try {
       const data = await getBriefing(params);
       setBriefing(data);
@@ -98,22 +143,59 @@ const Index = () => {
                 <Skeleton className="h-[400px]" />
                 <Skeleton className="h-[400px]" />
               </>
-            ) : briefing ? (
+            ) : null}
+            {!loading && briefing && (
               <>
-                <WeatherCard 
-                  data={briefing.weather} 
+                <WeatherCard
+                  data={briefing.weather}
                   onDetailClick={() => setWeatherModalOpen(true)}
                 />
-                <AirQualityCard 
-                  data={briefing.air} 
+                <AirQualityCard
+                  data={briefing.air}
                   onDetailClick={() => setAirModalOpen(true)}
                 />
-                <TrafficCard 
-                  data={briefing.traffic} 
-                  onDetailClick={() => setTrafficModalOpen(true)}
-                />
+                {hasDualTraffic ? (
+                  <div className="flex flex-col gap-4 rounded-xl bg-card p-6 shadow-md">
+                    <ModeSelector
+                      value={selectedMode}
+                      onChange={handleModeChange}
+                      disabled={loading}
+                      recommendation={recommendation?.mode ?? undefined}
+                    />
+                    {showRecommendationBanner && bannerRecommendedMode && (
+                      <RecommendationBanner
+                        preferred={selectedMode}
+                        recommended={bannerRecommendedMode}
+                        carEtaMinutes={car?.eta_minutes ?? null}
+                        transitEtaMinutes={transit?.eta_minutes ?? null}
+                        deltaMinutes={recommendation?.delta_min ?? null}
+                        reason={recommendation?.reason ?? null}
+                      />
+                    )}
+                    <EtaCompareCard
+                      car={car || undefined}
+                      transit={transit || undefined}
+                      selected={selectedMode}
+                      onSelect={handleModeChange}
+                      recommended={recommendation?.mode ?? undefined}
+                      loading={loading}
+                    />
+                    {selectedMode === 'car' && car?.tollgates && car.tollgates.length > 0 && (
+                      <TollgatePanel tollgates={car.tollgates} />
+                    )}
+                  </div>
+                ) : briefing.traffic ? (
+                  <TrafficCard
+                    data={briefing.traffic}
+                    onDetailClick={() => setTrafficModalOpen(true)}
+                  />
+                ) : (
+                  <div className="rounded-xl border border-dashed border-border/60 bg-muted/30 p-6 text-sm text-muted-foreground">
+                    교통 정보를 불러오지 못했습니다.
+                  </div>
+                )}
               </>
-            ) : null}
+            )}
           </div>
         )}
 
