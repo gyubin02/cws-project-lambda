@@ -9,6 +9,7 @@ import type { GeoJsonFeatureCollection } from '../adapters/tmap.adapter';
 import { ExpresswayAdapter } from '../adapters/expressway.adapter';
 import type { PlazaTraffic } from '../adapters/expressway.adapter';
 import { logger } from '../lib/logger';
+import { ENV } from '../lib/env';
 import { UpstreamError } from '../lib/errors';
 import {
   calculateDistance,
@@ -17,8 +18,10 @@ import {
   normalizeTollgateDataset,
 } from '../lib/util';
 import type { MatchedTollgate, Tollgate } from '../lib/util';
-import type { Coordinates, TrafficBrief, TrafficMode } from '../types';
+import type { Coordinates, TrafficBrief, TrafficMode, TrafficTollgate } from '../types';
 import type { SourceStatus } from '../lib/errors';
+import { recommendService } from './recommend.service';
+import type { CityRecommendation } from './recommend.service';
 
 type CityTrafficResult = {
   car?: TrafficBrief;
@@ -67,6 +70,12 @@ export type RouteTollgatesResult = {
 
 const TOLLGATE_DATA_PATH = path.resolve(__dirname, '../../data/expressway_tollgates.json');
 
+export type AggregatedCityTraffic = {
+  car: (TrafficBrief & { tollgates?: TrafficTollgate[] }) | null;
+  transit: TrafficBrief | null;
+  recommendation: CityRecommendation;
+};
+
 export class TrafficService {
   private readonly tmap: TmapAdapter;
   private readonly expressway: ExpresswayAdapter;
@@ -86,12 +95,23 @@ export class TrafficService {
     const requested = modes ?? ['car', 'transit'];
     const result: CityTrafficResult = {};
 
-    if (requested.includes('car')) {
-      result.car = await this.callTmap('car', from, to, when);
-    }
+    const needCar = requested.includes('car');
+    const needTransit = requested.includes('transit');
 
-    if (requested.includes('transit')) {
-      result.transit = await this.callTmap('transit', from, to, when);
+    if (needCar && needTransit) {
+      const [car, transit] = await Promise.all([
+        this.callTmap('car', from, to, when),
+        this.callTmap('transit', from, to, when),
+      ]);
+      result.car = car;
+      result.transit = transit;
+    } else {
+      if (needCar) {
+        result.car = await this.callTmap('car', from, to, when);
+      }
+      if (needTransit) {
+        result.transit = await this.callTmap('transit', from, to, when);
+      }
     }
 
     if (requested.includes('walk')) {
@@ -103,6 +123,50 @@ export class TrafficService {
     }
 
     return result;
+  }
+
+  async getAggregatedCityTraffic(
+    from: Coordinates,
+    to: Coordinates,
+    opts: { when?: Date } = {}
+  ): Promise<AggregatedCityTraffic> {
+    const { when } = opts;
+    const city = await this.getCityTraffic(from, to, { when, modes: ['car', 'transit'] });
+
+    let carBrief = city.car ?? null;
+    const transitBrief = city.transit ?? null;
+
+    if (carBrief) {
+      let tollgates: TrafficTollgate[] = [];
+      if (carBrief.polyline) {
+        try {
+          const tollgateResult = await this.getRouteTollgates({ from, to });
+          tollgates = tollgateResult.tollgates.map((gate) => this.toTrafficTollgate(gate));
+        } catch (error) {
+          logger.warn(
+            {
+              error: error instanceof Error ? error.message : String(error),
+              from,
+              to,
+            },
+            'Failed to attach tollgates to car brief'
+          );
+        }
+      }
+      carBrief = { ...carBrief, tollgates };
+    }
+
+    const recommendation = recommendService.pickMode({
+      car: carBrief ?? undefined,
+      transit: transitBrief ?? undefined,
+      tieThresholdMin: ENV.ETA_TIE_THRESHOLD_MIN,
+    });
+
+    return {
+      car: carBrief,
+      transit: transitBrief ?? null,
+      recommendation,
+    };
   }
 
   async getExpresswayTraffic(
@@ -300,6 +364,39 @@ export class TrafficService {
       })();
     }
     return this.tollgateDatasetPromise;
+  }
+
+  private mapTollgateCongestion(value?: string | null): TrafficTollgate['congestion'] | undefined {
+    if (!value) return undefined;
+    const normalized = value.toUpperCase();
+    if (normalized.includes('SMOOTH')) return 'SMOOTH';
+    if (normalized.includes('SLOW') || normalized.includes('MODERATE')) return 'MODERATE';
+    if (normalized.includes('HEAVY') || normalized.includes('CONGEST')) return 'CONGESTED';
+    if (normalized.includes('BLOCK')) return 'BLOCKED';
+    return undefined;
+  }
+
+  private toTrafficTollgate(gate: RouteTollgatesResult['tollgates'][number]): TrafficTollgate {
+    const tollgate: TrafficTollgate = {
+      code: gate.id,
+      name: gate.name,
+      lat: gate.lat,
+      lon: gate.lon,
+    };
+    const congestion = this.mapTollgateCongestion(gate.kec?.congestionLevel);
+    if (congestion) {
+      tollgate.congestion = congestion;
+    }
+    if (typeof gate.kec?.speedKph === 'number' && Number.isFinite(gate.kec.speedKph)) {
+      tollgate.speed_kph = Math.round(gate.kec.speedKph);
+    }
+    if (gate.kec?.observedAt) {
+      tollgate.updated_at = gate.kec.observedAt;
+    }
+    if (gate.kec?.source) {
+      tollgate.source = gate.kec.source;
+    }
+    return tollgate;
   }
 
   private extractRouteLine(

@@ -1,5 +1,12 @@
 import type { Recommendation, TrafficBrief, TrafficMode } from '../types';
 
+export type CityRecommendation = {
+  mode: 'car' | 'transit' | 'tie';
+  delta_min?: number;
+  reasons: string[];
+  reason?: string;
+};
+
 export type RecommendInput = {
   car?: TrafficBrief;
   transit?: TrafficBrief;
@@ -9,7 +16,13 @@ export type RecommendInput = {
 };
 
 function isUsable(brief: TrafficBrief | undefined): brief is TrafficBrief {
-  return !!brief && brief.source_status !== 'upstream_error' && brief.source_status !== 'timeout' && brief.source_status !== 'bad_response';
+  return (
+    !!brief &&
+    brief.source_status !== 'upstream_error' &&
+    brief.source_status !== 'timeout' &&
+    brief.source_status !== 'bad_response' &&
+    brief.source_status !== 'error'
+  );
 }
 
 function eta(brief: TrafficBrief | undefined): number | undefined {
@@ -33,6 +46,45 @@ function etaGap(a: TrafficBrief | undefined, b: TrafficBrief | undefined): numbe
 }
 
 export class RecommendService {
+  pickMode(input: { car?: TrafficBrief | null; transit?: TrafficBrief | null; tieThresholdMin?: number }): CityRecommendation {
+    const car = input.car ?? undefined;
+    const transit = input.transit ?? undefined;
+    const threshold = Number.isFinite(input.tieThresholdMin)
+      ? Math.max(0, Math.floor(Number(input.tieThresholdMin)))
+      : 3;
+
+    const carEta = eta(car);
+    const transitEta = eta(transit);
+
+    if (carEta == null && transitEta == null) {
+      return { mode: 'tie', reasons: ['insufficient_data'], reason: 'no data' };
+    }
+
+    if (carEta != null && transitEta != null) {
+      const delta = Math.abs(carEta - transitEta);
+      if (delta <= threshold) {
+        return { mode: 'tie', delta_min: delta, reasons: ['eta_tie'], reason: 'within tie margin' };
+      }
+      const recommendedMode = carEta <= transitEta ? 'car' : 'transit';
+      const deltaRounded = Math.round(delta);
+      return {
+        mode: recommendedMode,
+        delta_min: delta,
+        reasons: ['eta_gap'],
+        reason:
+          recommendedMode === 'car'
+            ? `car faster by ${deltaRounded}m`
+            : `transit faster by ${deltaRounded}m`,
+      };
+    }
+
+    if (carEta != null) {
+      return { mode: 'car', reasons: ['transit_unavailable'], reason: 'transit missing' };
+    }
+
+    return { mode: 'transit', reasons: ['car_unavailable'], reason: 'car missing' };
+  }
+
   buildRecommendation(input: RecommendInput): Recommendation {
     const { car, transit, expressway, pop, preferred } = input;
     const fastest = chooseFaster(car, transit) ?? car ?? transit ?? expressway;

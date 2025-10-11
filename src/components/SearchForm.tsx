@@ -3,6 +3,8 @@ import { MapPin, Navigation } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ModeSelector } from '@/components/travel/ModeSelector';
+import type { TravelMode } from '@/lib/types/traffic';
 import { SearchParams } from '@/lib/types';
 
 interface SearchFormProps {
@@ -11,12 +13,13 @@ interface SearchFormProps {
 }
 
 export function SearchForm({ onSubmit, loading }: SearchFormProps) {
-  const [from, setFrom] = useState('강남역');
-  const [to, setTo] = useState('서울역');
+  const [from, setFrom] = useState('서울특별시 중구 세종대로 110');
+  const [to, setTo] = useState('서울특별시 송파구 올림픽로 300');
+  const [mode, setMode] = useState<TravelMode>('car');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit({ from, to });
+    onSubmit({ from, to, mode });
   };
 
   return (
@@ -51,6 +54,13 @@ export function SearchForm({ onSubmit, loading }: SearchFormProps) {
             className="transition-smooth"
           />
         </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Preferred Mode
+        </Label>
+        <ModeSelector value={mode} onChange={setMode} disabled={loading} />
       </div>
 
       <Button

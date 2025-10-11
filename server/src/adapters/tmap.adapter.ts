@@ -3,7 +3,7 @@ import path from 'node:path';
 import { cached } from '../lib/cache';
 import { ENV } from '../lib/env';
 import { liveOrMock } from '../lib/liveOrMock';
-import { http } from '../lib/http';
+import { http, joinUrl } from '../lib/http';
 import { logger } from '../lib/logger';
 import { UpstreamError } from '../lib/errors';
 import type { Coordinates, TrafficBrief, TrafficMode, TrafficStep } from '../types';
@@ -12,9 +12,18 @@ const FIXTURE_DIR = path.resolve(__dirname, '../../../fixtures');
 const CAR_FIXTURE_PATH = path.join(FIXTURE_DIR, 'tmap_car.sample.json');
 const TRANSIT_FIXTURE_PATH = path.join(FIXTURE_DIR, 'tmap_transit.sample.json');
 const GEOCODE_FIXTURE_PATH = path.join(FIXTURE_DIR, 'tmap_geocode.sample.json');
-const TMAP_BASE_URL = (process.env['TMAP_BASE_URL'] ?? '').trim() || 'https://apis.openapi.sk.com/tmap';
 export const GEOCODE_LIVE_FAILURE_PREFIX = 'geocode_failed_live_only:';
 const GEOCODE_ERROR_SNIPPET_MAX = 160;
+const DEFAULT_TMAP_CAR_BASE_URL = 'https://apis.openapi.sk.com/tmap';
+const DEFAULT_TMAP_TRANSIT_BASE_URL = 'https://apis.openapi.sk.com/transit';
+
+const buildUrl = (kind: 'car' | 'transit', path: string): string => {
+  const base =
+    kind === 'transit'
+      ? ENV.TMAP_TRANSIT_BASE_URL || DEFAULT_TMAP_TRANSIT_BASE_URL
+      : ENV.TMAP_CAR_BASE_URL || DEFAULT_TMAP_CAR_BASE_URL;
+  return joinUrl(base, path);
+};
 
 type CachedMode = Extract<TrafficMode, 'car' | 'transit'>;
 
@@ -65,6 +74,7 @@ type CarRouteFetchResult = {
   normalized: NormalizedRoute;
   status: TrafficBrief['source_status'];
   note?: string;
+  polyline?: GeoJsonLineString;
 };
 
 const toNumber = (value: unknown): number | undefined => {
@@ -319,38 +329,175 @@ function buildCarRouteGeometry(raw: any, from: Coordinates, to: Coordinates): Ge
   return { type: 'FeatureCollection', features };
 }
 
+function buildCarRouteLineString(
+  raw: any,
+  from: Coordinates,
+  to: Coordinates
+): GeoJsonLineString | undefined {
+  const extracted = extractRouteCoordinates(raw);
+  const lineCoords = ensureLineCoordinates(extracted, from, to);
+  if (lineCoords.length < 2) {
+    return undefined;
+  }
+  return {
+    type: 'LineString',
+    coordinates: lineCoords,
+  };
+}
+
+function formatTransitTime(when: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const yyyy = when.getFullYear();
+  const mm = pad(when.getMonth() + 1);
+  const dd = pad(when.getDate());
+  const hh = pad(when.getHours());
+  const mi = pad(when.getMinutes());
+  return `${yyyy}${mm}${dd}${hh}${mi}`;
+}
+
+type TransitParams = {
+  startX: string;
+  startY: string;
+  endX: string;
+  endY: string;
+  format: 'json';
+  lang: 0 | 1;
+  count?: number;
+  searchDttm?: string;
+};
+
+const buildTransitParams = (from: Coordinates, to: Coordinates, when?: Date): TransitParams => {
+  const toFixed = (value: number) => value.toFixed(6);
+  const params: TransitParams = {
+    startX: toFixed(from.lon),
+    startY: toFixed(from.lat),
+    endX: toFixed(to.lon),
+    endY: toFixed(to.lat),
+    format: 'json',
+    lang: 0,
+  };
+  if (when) {
+    params.searchDttm = formatTransitTime(when);
+  }
+  return params;
+};
+
 function normalizeTransitRoute(data: any): NormalizedRoute {
   const normalized: NormalizedRoute = { segments: [] };
-  const path = data?.paths?.[0];
-  if (path) {
-    const distance = toNumber(path.summary?.distance);
-    if (distance != null && normalized.distanceMeters == null) {
-      normalized.distanceMeters = distance;
-    }
-    const duration = toNumber(path.summary?.duration);
-    if (duration != null && normalized.durationSeconds == null) {
-      normalized.durationSeconds = duration;
-    }
-    const fare = toNumber(path.summary?.fare ?? path.summary?.payment);
-    if (fare != null && normalized.fare == null) {
-      normalized.fare = fare;
-    }
-    const transfers = toNumber(path.summary?.transfers ?? path.summary?.transferCount);
-    if (transfers != null && normalized.transfers == null) {
-      normalized.transfers = transfers;
+
+  const itinerary = Array.isArray(data?.plan?.itineraries) ? data.plan.itineraries[0] : undefined;
+  if (itinerary) {
+    const distance = toNumber(
+      itinerary.totalDistance ??
+        itinerary.totalWalkDistance ??
+        itinerary.totalDistanceMeter ??
+        itinerary.totalLength
+    );
+    if (distance != null) {
+      normalized.distanceMeters ??= distance;
     }
 
-    if (Array.isArray(path.steps)) {
-      for (const step of path.steps) {
-        const seg: NormalizedSegment = { type: step?.type ?? 'walk' };
-        if (step?.name) {
-          seg.label = step.name;
+    const duration = toNumber(itinerary.totalTime ?? itinerary.totalTravelTime);
+    if (duration != null) {
+      normalized.durationSeconds ??= duration;
+    }
+
+    const fareCandidates = [
+      itinerary.fare?.regular?.totalFare,
+      itinerary.fare?.regular?.cashFare,
+      itinerary.fare?.regular?.sumFare,
+      itinerary.fare?.regularFare?.totalFare,
+      itinerary.fare?.regularFare?.fare,
+      itinerary.fare?.fare,
+      itinerary.totalFare,
+    ];
+    for (const candidate of fareCandidates) {
+      const fare = toNumber(candidate);
+      if (fare != null) {
+        normalized.fare ??= fare;
+        if (normalized.fare != null) break;
+      }
+    }
+
+    const transfer = toNumber(
+      itinerary.transferCount ?? itinerary.transfers ?? itinerary.transfer ?? itinerary.transferCnt
+    );
+    if (transfer != null) {
+      normalized.transfers ??= transfer;
+    }
+
+    if (Array.isArray(itinerary.legs)) {
+      for (const leg of itinerary.legs) {
+        const seg: NormalizedSegment = {};
+        const modeValue = typeof leg.mode === 'string' ? leg.mode.toLowerCase() : '';
+        if (modeValue.includes('walk')) {
+          seg.type = 'walk';
+        } else if (modeValue.includes('bus')) {
+          seg.type = 'bus';
+        } else if (modeValue.includes('subway') || modeValue.includes('metro') || modeValue.includes('rail')) {
+          seg.type = 'metro';
+        } else {
+          seg.type = 'walk';
         }
-        const duration = toNumber(step?.duration);
-        if (duration != null) {
-          seg.durationSeconds = duration;
+
+        const nameCandidates = [
+          leg.route,
+          leg.routeName,
+          leg.modeName,
+          leg.sectionNm,
+          leg.routeId,
+        ];
+        for (const candidate of nameCandidates) {
+          if (typeof candidate === 'string' && candidate.trim()) {
+            seg.label = candidate.trim();
+            break;
+          }
         }
+
+        const legDuration = toNumber(
+          leg.sectionTime ?? leg.duration ?? leg.time ?? leg.totalTime ?? leg.travelTime
+        );
+        if (legDuration != null) {
+          seg.durationSeconds = legDuration;
+        }
+
         normalized.segments.push(seg);
+      }
+    }
+  }
+
+  if (!normalized.durationSeconds || !normalized.distanceMeters || normalized.segments.length === 0) {
+    const path = data?.paths?.[0];
+    if (path) {
+      const distance = toNumber(path.summary?.distance);
+      if (distance != null && normalized.distanceMeters == null) {
+        normalized.distanceMeters = distance;
+      }
+      const duration = toNumber(path.summary?.duration);
+      if (duration != null && normalized.durationSeconds == null) {
+        normalized.durationSeconds = duration;
+      }
+      const fare = toNumber(path.summary?.fare ?? path.summary?.payment);
+      if (fare != null && normalized.fare == null) {
+        normalized.fare = fare;
+      }
+      const transfers = toNumber(path.summary?.transfers ?? path.summary?.transferCount);
+      if (transfers != null && normalized.transfers == null) {
+        normalized.transfers = transfers;
+      }
+
+      if (Array.isArray(path.steps)) {
+        for (const step of path.steps) {
+          const seg: NormalizedSegment = { type: step?.type ?? 'walk' };
+          if (step?.name) {
+            seg.label = step.name;
+          }
+          const stepDuration = toNumber(step?.duration);
+          if (stepDuration != null) {
+            seg.durationSeconds = stepDuration;
+          }
+          normalized.segments.push(seg);
+        }
       }
     }
   }
@@ -376,6 +523,7 @@ type MapRouteOptions = {
   status: TrafficBrief['source_status'];
   mode: Extract<TrafficMode, 'car' | 'transit'>;
   note?: string;
+  polyline?: GeoJsonLineString;
 };
 
 function mapNormalizedRoute(route: NormalizedRoute, opts: MapRouteOptions): TrafficBrief {
@@ -407,6 +555,10 @@ function mapNormalizedRoute(route: NormalizedRoute, opts: MapRouteOptions): Traf
     mode: opts.mode,
     eta_minutes: etaMinutes,
   };
+
+  if (opts.polyline) {
+    brief.polyline = opts.polyline;
+  }
 
   if (distanceKm != null) {
     brief.distance_km = distanceKm;
@@ -566,10 +718,10 @@ async function performLiveGeocode(normalizedQuery: string): Promise<Coordinates>
   }
 
   try {
-    const response = await http.get(`${TMAP_BASE_URL}/geo/fullAddrGeo`, {
-      headers: { Accept: 'application/json'},
+    const response = await http.get(buildUrl('car', '/geo/fullAddrGeo'), {
+      headers: { Accept: 'application/json', appKey: apiKey },
       params: {
-	appKey: apiKey,
+        appKey: apiKey,
         fullAddr: normalizedQuery,
         coordType: 'WGS84GEO',
         version: 1,
@@ -623,7 +775,8 @@ export class TmapAdapter {
       ): Promise<CarRouteFetchResult> => {
         const raw = await readJsonFixture(CAR_FIXTURE_PATH);
         const normalized = normalizeCarRoute(raw);
-        return { raw, normalized, status, note };
+        const polyline = buildCarRouteLineString(raw, from, to);
+        return { raw, normalized, status, note, polyline };
       };
 
       if (mode === 'live') {
@@ -635,7 +788,7 @@ export class TmapAdapter {
 
         try {
           const response = await http.post(
-            `${TMAP_BASE_URL}/routes?version=1`,
+            buildUrl('car', ENV.TMAP_CAR_PATH || '/routes'),
             {
               startX: from.lon,
               startY: from.lat,
@@ -645,13 +798,15 @@ export class TmapAdapter {
               resCoordType: 'WGS84GEO',
             },
             {
-              params: { appKey: apiKey, version: 1 },
+              headers: { appKey: apiKey, Accept: 'application/json' },
+              params: { version: 1 },
             }
           );
 
           const raw = response.data;
           const normalized = normalizeCarRoute(raw);
-          return { raw, normalized, status: 'ok' };
+          const polyline = buildCarRouteLineString(raw, from, to);
+          return { raw, normalized, status: 'ok', polyline };
         } catch (error) {
           logger.warn(
             {
@@ -660,16 +815,15 @@ export class TmapAdapter {
             },
             'TMAP live request failed — falling back to fixture.'
           );
-          return loadFixture('upstream_error', 'TMAP live request failed — returning fixture data.');
+          return loadFixture('degraded', 'TMAP live request failed — returning fixture data.');
         }
       }
 
-      const forcedMock = ENV.MOCK === 1 && !!ENV.TMAP_API_KEY;
-      const status: TrafficBrief['source_status'] = forcedMock ? 'upstream_error' : 'missing_api_key';
-      const note = forcedMock
-        ? 'MOCK=1 flag set — returning fixture data.'
-        : 'TMAP API key missing — returning fixture data.';
-      return loadFixture(status, note);
+      if (ENV.MOCK === 1) {
+        return loadFixture('mock', 'MOCK=1 flag set — returning fixture data.');
+      }
+
+      return loadFixture('missing_api_key', 'TMAP API key missing — returning fixture data.');
     });
   }
 
@@ -678,6 +832,9 @@ export class TmapAdapter {
     const options: MapRouteOptions = { status: result.status, mode: 'car' };
     if (result.note) {
       options.note = result.note;
+    }
+    if (result.polyline) {
+      options.polyline = result.polyline;
     }
     return mapNormalizedRoute(result.normalized, options);
   }
@@ -705,31 +862,51 @@ export class TmapAdapter {
     const mode = liveOrMock('tmap');
 
     return cached(cacheKey, async () => {
-      const data = await readJsonFixture(TRANSIT_FIXTURE_PATH);
-      const normalized = normalizeTransitRoute(data);
-
-      let status: TrafficBrief['source_status'];
-      let note: string;
+      const loadFixture = async (
+        status: TrafficBrief['source_status'],
+        note: string
+      ): Promise<TrafficBrief> => {
+        const data = await readJsonFixture(TRANSIT_FIXTURE_PATH);
+        const normalized = normalizeTransitRoute(data);
+        return mapNormalizedRoute(normalized, { status, mode: 'transit', note });
+      };
 
       if (mode === 'live') {
-        status = 'upstream_error';
-        note = 'TMAP transit live endpoint pending — returning fixture data.';
-      } else if (!ENV.TMAP_API_KEY) {
-        status = 'missing_api_key';
-        note = 'TMAP API key missing — returning fixture data.';
-      } else if (ENV.MOCK === 1) {
-        status = 'upstream_error';
-        note = 'MOCK=1 flag set — returning fixture transit data.';
-      } else {
-        status = 'upstream_error';
-        note = 'TMAP transit live endpoint pending — returning fixture data.';
+        const apiKey = ENV.TMAP_API_KEY;
+        if (!apiKey) {
+          logger.warn({ adapter: 'tmap', op: 'transit' }, 'TMAP API key missing during live transit request — falling back to fixture.');
+          return loadFixture('missing_api_key', 'TMAP API key missing — returning fixture transit data.');
+        }
+
+        try {
+          const response = await http.post(
+            buildUrl('transit', ENV.TMAP_TRANSIT_PATH || '/routes'),
+            buildTransitParams(from, to, when),
+            {
+              headers: { appKey: apiKey, Accept: 'application/json', 'Content-Type': 'application/json' },
+            }
+          );
+
+          const normalized = normalizeTransitRoute(response.data);
+          return mapNormalizedRoute(normalized, { status: 'ok', mode: 'transit' });
+        } catch (error) {
+          logger.warn(
+            {
+              adapter: 'tmap',
+              op: 'transit',
+              error: error instanceof Error ? error.message : String(error),
+            },
+            'TMAP transit live request failed — falling back to fixture data.'
+          );
+          return loadFixture('degraded', 'TMAP transit live request failed — returning fixture transit data.');
+        }
       }
 
-      return mapNormalizedRoute(normalized, {
-        status,
-        mode: 'transit',
-        note,
-      });
+      if (ENV.MOCK === 1) {
+        return loadFixture('mock', 'MOCK=1 flag set — returning fixture transit data.');
+      }
+
+      return loadFixture('missing_api_key', 'TMAP API key missing — returning fixture transit data.');
     });
   }
 

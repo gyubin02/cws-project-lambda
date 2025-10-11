@@ -60,6 +60,23 @@ export type TrafficStep = {
   duration_min?: number;
 };
 
+export type GeoJsonLineString = {
+  type: 'LineString';
+  coordinates: Array<[number, number]>;
+};
+
+export type TrafficTollgate = {
+  code: string;
+  name: string;
+  lat: number;
+  lon: number;
+  congestion?: 'SMOOTH' | 'MODERATE' | 'CONGESTED' | 'BLOCKED';
+  speed_kph?: number;
+  delay_min?: number;
+  updated_at?: string;
+  source?: string;
+};
+
 export type TrafficBrief = {
   source: 'tmap' | 'expressway';
   source_status: SourceStatus;
@@ -72,6 +89,8 @@ export type TrafficBrief = {
   steps?: TrafficStep[];
   congestion_level?: 'LOW' | 'MID' | 'HIGH';
   notes?: string[];
+  polyline?: GeoJsonLineString;
+  tollgates?: TrafficTollgate[];
 };
 
 export type TrafficOverview = {

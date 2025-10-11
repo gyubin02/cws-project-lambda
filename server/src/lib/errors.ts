@@ -3,7 +3,10 @@ export type SourceStatus =
   | 'missing_api_key'
   | 'upstream_error'
   | 'timeout'
-  | 'bad_response';
+  | 'bad_response'
+  | 'mock'
+  | 'degraded'
+  | 'error';
 
 export class UpstreamError extends Error {
   code: SourceStatus;

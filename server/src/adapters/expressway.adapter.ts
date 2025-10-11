@@ -288,16 +288,15 @@ export class ExpresswayAdapter {
             },
             'Expressway live request failed — falling back to fixture data.'
           );
-          return loadMock('upstream_error', 'Expressway live request failed — returning fixture data.');
+          return loadMock('degraded', 'Expressway live request failed — returning fixture data.');
         }
       }
 
-      const forcedMock = ENV.MOCK === 1 && !!apiKey;
-      const status: TrafficBrief['source_status'] = forcedMock ? 'upstream_error' : 'missing_api_key';
-      const note = forcedMock
-        ? 'MOCK=1 flag set — returning fixture expressway data.'
-        : 'Expressway API key missing — returning fixture data.';
-      return loadMock(status, note);
+      if (ENV.MOCK === 1) {
+        return loadMock('mock', 'MOCK=1 flag set — returning fixture expressway data.');
+      }
+
+      return loadMock('missing_api_key', 'Expressway API key missing — returning fixture data.');
     });
   }
 

@@ -6,7 +6,6 @@ import express from 'express';
 import { z } from 'zod';
 import { trafficService } from '../services/traffic.service';
 import { logger } from '../lib/logger';
-import { UpstreamError } from '../lib/errors';
 import type { Coordinates } from '../types';
 import { parseCoordOrGeocode, COORDINATE_REGEX, LOCATION_INPUT_MESSAGE } from '../lib/util';
 import { tmapAdapter } from '../adapters/tmap.adapter';
@@ -22,6 +21,7 @@ const CityQuerySchema = z.object({
   from: locationSchema,
   to: locationSchema,
   time: z.string().datetime().optional(),
+  at: z.string().datetime().optional(),
 });
 
 const ExpresswayQuerySchema = CityQuerySchema;
@@ -66,7 +66,8 @@ router.get('/car', async (req: any, res: any) => {
     return res.status(400).json({ error: 'bad_request', message: LOCATION_INPUT_MESSAGE, issues: parsed.error.issues });
   }
 
-  const { from, to, time } = parsed.data;
+  const { from, to } = parsed.data;
+  const whenValue = parsed.data.at ?? parsed.data.time;
   let fromCoords: Coordinates;
   let toCoords: Coordinates;
   try {
@@ -77,8 +78,8 @@ router.get('/car', async (req: any, res: any) => {
   }
 
   const opts: Parameters<typeof trafficService.getCityTraffic>[2] = { modes: ['car'] };
-  if (time) {
-    opts.when = new Date(time);
+  if (whenValue) {
+    opts.when = new Date(whenValue);
   }
 
   const cityTraffic = await trafficService.getCityTraffic(fromCoords, toCoords, opts);
@@ -97,7 +98,8 @@ router.get('/transit', async (req: any, res: any) => {
     return res.status(400).json({ error: 'bad_request', message: LOCATION_INPUT_MESSAGE, issues: parsed.error.issues });
   }
 
-  const { from, to, time } = parsed.data;
+  const { from, to } = parsed.data;
+  const whenValue = parsed.data.at ?? parsed.data.time;
   let fromCoords: Coordinates;
   let toCoords: Coordinates;
   try {
@@ -108,8 +110,8 @@ router.get('/transit', async (req: any, res: any) => {
   }
 
   const opts: Parameters<typeof trafficService.getCityTraffic>[2] = { modes: ['transit'] };
-  if (time) {
-    opts.when = new Date(time);
+  if (whenValue) {
+    opts.when = new Date(whenValue);
   }
 
   const cityTraffic = await trafficService.getCityTraffic(fromCoords, toCoords, opts);
@@ -122,13 +124,67 @@ router.get('/transit', async (req: any, res: any) => {
   return res.json(cityTraffic.transit);
 });
 
+router.get('/city', async (req: any, res: any) => {
+  const parsed = CityQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({ ok: false, error: 'bad_request', message: LOCATION_INPUT_MESSAGE, issues: parsed.error.issues });
+  }
+
+  const { from, to } = parsed.data;
+  const whenValue = parsed.data.at ?? parsed.data.time;
+  let fromCoords: Coordinates;
+  let toCoords: Coordinates;
+
+  try {
+    fromCoords = await parseCoordOrGeocode(from, (query) => tmapAdapter.geocode(query));
+    toCoords = await parseCoordOrGeocode(to, (query) => tmapAdapter.geocode(query));
+  } catch (error) {
+    return res.status(400).json({
+      ok: false,
+      error: 'bad_request',
+      message: (error as Error).message || LOCATION_INPUT_MESSAGE,
+    });
+  }
+
+  const when = whenValue ? new Date(whenValue) : undefined;
+
+  try {
+    const aggregated = await trafficService.getAggregatedCityTraffic(fromCoords, toCoords, { when });
+
+    logger.info(
+      { from: fromCoords, to: toCoords, route: 'city' },
+      'Returned aggregated city traffic'
+    );
+
+    return res.json({
+      ok: true,
+      data: aggregated,
+    });
+  } catch (error) {
+    logger.error(
+      {
+        error: error instanceof Error ? error.message : String(error),
+        from: fromCoords,
+        to: toCoords,
+      },
+      'Failed to fetch aggregated city traffic'
+    );
+    return res.status(500).json({
+      ok: false,
+      error: 'city_fetch_failed',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
 router.get('/expressway', async (req: any, res: any) => {
   const parsed = ExpresswayQuerySchema.safeParse(req.query);
   if (!parsed.success) {
     return res.status(400).json({ error: 'bad_request', message: LOCATION_INPUT_MESSAGE, issues: parsed.error.issues });
   }
 
-  const { from, to, time } = parsed.data;
+  const { from, to } = parsed.data;
+  const whenValue = parsed.data.at ?? parsed.data.time;
   let fromCoords: Coordinates;
   let toCoords: Coordinates;
   try {
@@ -139,8 +195,8 @@ router.get('/expressway', async (req: any, res: any) => {
   }
 
   const opts: Parameters<typeof trafficService.getExpresswayTraffic>[2] = {};
-  if (time) {
-    opts.when = new Date(time);
+  if (whenValue) {
+    opts.when = new Date(whenValue);
   }
 
   const expressway = await trafficService.getExpresswayTraffic(fromCoords, toCoords, opts);
