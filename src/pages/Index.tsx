@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Settings } from 'lucide-react';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
+import { TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SearchForm } from '@/components/SearchForm';
 import { WeatherCard } from '@/components/WeatherCard';
@@ -155,35 +157,53 @@ const Index = () => {
                   onDetailClick={() => setAirModalOpen(true)}
                 />
                 {hasDualTraffic ? (
-                  <div className="flex flex-col gap-4 rounded-xl bg-card p-6 shadow-md">
-                    <ModeSelector
-                      value={selectedMode}
-                      onChange={handleModeChange}
-                      disabled={loading}
-                      recommendation={recommendation?.mode ?? undefined}
-                    />
-                    {showRecommendationBanner && bannerRecommendedMode && (
-                      <RecommendationBanner
-                        preferred={selectedMode}
-                        recommended={bannerRecommendedMode}
-                        carEtaMinutes={car?.eta_minutes ?? null}
-                        transitEtaMinutes={transit?.eta_minutes ?? null}
-                        deltaMinutes={recommendation?.delta_min ?? null}
-                        reason={recommendation?.reason ?? null}
+                  <Card className="cursor-pointer transition-all hover:shadow-lg hover:-translate-y-1 bg-gradient-card">
+                    <CardHeader>
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <CardTitle className="flex items-center gap-2">
+                            <TrendingUp className="h-5 w-5 text-primary" />
+                            교통 및 경로
+                          </CardTitle>
+                          <CardDescription>자동차 · 대중교통 ETA 비교</CardDescription>
+                        </div>
+
+                        <ModeSelector
+                          value={selectedMode}
+                          onChange={handleModeChange}
+                          disabled={loading}
+                          recommendation={recommendation?.mode ?? undefined}
+                          className="mt-1"
+                        />
+                      </div>
+                    </CardHeader>
+
+                    <CardContent className="space-y-4">
+                      {showRecommendationBanner && bannerRecommendedMode && (
+                        <RecommendationBanner
+                          preferred={selectedMode}
+                          recommended={bannerRecommendedMode}
+                          carEtaMinutes={car?.eta_minutes ?? null}
+                          transitEtaMinutes={transit?.eta_minutes ?? null}
+                          deltaMinutes={recommendation?.delta_min ?? null}
+                          reason={recommendation?.reason ?? null}
+                        />
+                      )}
+
+                      <EtaCompareCard
+                        car={car || undefined}
+                        transit={transit || undefined}
+                        selected={selectedMode}
+                        onSelect={handleModeChange}
+                        recommended={recommendation?.mode ?? undefined}
+                        loading={loading}
                       />
-                    )}
-                    <EtaCompareCard
-                      car={car || undefined}
-                      transit={transit || undefined}
-                      selected={selectedMode}
-                      onSelect={handleModeChange}
-                      recommended={recommendation?.mode ?? undefined}
-                      loading={loading}
-                    />
-                    {selectedMode === 'car' && car?.tollgates && car.tollgates.length > 0 && (
-                      <TollgatePanel tollgates={car.tollgates} />
-                    )}
-                  </div>
+
+                      {selectedMode === 'car' && car?.tollgates && car.tollgates.length > 0 && (
+                        <TollgatePanel tollgates={car.tollgates} />
+                      )}
+                    </CardContent>
+                  </Card>
                 ) : briefing.traffic ? (
                   <TrafficCard
                     data={briefing.traffic}

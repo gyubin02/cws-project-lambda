@@ -13,8 +13,8 @@ interface SearchFormProps {
 }
 
 export function SearchForm({ onSubmit, loading }: SearchFormProps) {
-  const [from, setFrom] = useState('강남역');
-  const [to, setTo] = useState('서울역');
+  const [from, setFrom] = useState('서울특별시 중구 세종대로 110');
+  const [to, setTo] = useState('서울특별시 송파구 올림픽로 300');
   const [mode, setMode] = useState<TravelMode>('car');
 
   const handleSubmit = (e: React.FormEvent) => {
