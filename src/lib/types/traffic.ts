@@ -51,6 +51,7 @@ export interface CityRecommendation {
   mode: 'car' | 'transit' | 'tie';
   delta_min?: number;
   reasons?: string[];
+  reason?: string;
 }
 
 export interface CityTraffic {

@@ -51,3 +51,9 @@ http.interceptors.response.use(
     return http(cfg);
   }
 );
+
+export function joinUrl(base: string, path: string) {
+  const trimmedBase = base.replace(/\/+$/, '');
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  return `${trimmedBase}${normalizedPath}`;
+}

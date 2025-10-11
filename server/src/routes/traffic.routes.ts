@@ -5,11 +5,8 @@
 import express from 'express';
 import { z } from 'zod';
 import { trafficService } from '../services/traffic.service';
-import type { RouteTollgatesResult } from '../services/traffic.service';
-import { recommendService } from '../services/recommend.service';
 import { logger } from '../lib/logger';
-import { ENV } from '../lib/env';
-import type { Coordinates, TrafficTollgate } from '../types';
+import type { Coordinates } from '../types';
 import { parseCoordOrGeocode, COORDINATE_REGEX, LOCATION_INPUT_MESSAGE } from '../lib/util';
 import { tmapAdapter } from '../adapters/tmap.adapter';
 
@@ -62,39 +59,6 @@ const RouteTollgatesQuerySchema = z
       });
     }
   });
-
-const mapPlazaCongestion = (value?: string | null): TrafficTollgate['congestion'] | undefined => {
-  if (!value) return undefined;
-  const normalized = value.toUpperCase();
-  if (normalized.includes('SMOOTH')) return 'SMOOTH';
-  if (normalized.includes('SLOW') || normalized.includes('MODERATE')) return 'MODERATE';
-  if (normalized.includes('HEAVY') || normalized.includes('CONGEST')) return 'CONGESTED';
-  if (normalized.includes('BLOCK')) return 'BLOCKED';
-  return undefined;
-};
-
-const toCityTollgate = (gate: RouteTollgatesResult['tollgates'][number]): TrafficTollgate => {
-  const tollgate: TrafficTollgate = {
-    code: gate.id,
-    name: gate.name,
-    lat: gate.lat,
-    lon: gate.lon,
-  };
-  const congestion = mapPlazaCongestion(gate.kec?.congestionLevel);
-  if (congestion) {
-    tollgate.congestion = congestion;
-  }
-  if (typeof gate.kec?.speedKph === 'number' && Number.isFinite(gate.kec.speedKph)) {
-    tollgate.speed_kph = Math.round(gate.kec.speedKph);
-  }
-  if (gate.kec?.observedAt) {
-    tollgate.updated_at = gate.kec.observedAt;
-  }
-  if (gate.kec?.source) {
-    tollgate.source = gate.kec.source;
-  }
-  return tollgate;
-};
 
 router.get('/car', async (req: any, res: any) => {
   const parsed = CityQuerySchema.safeParse(req.query);
@@ -182,46 +146,10 @@ router.get('/city', async (req: any, res: any) => {
     });
   }
 
-  const opts: Parameters<typeof trafficService.getCityTraffic>[2] = { modes: ['car', 'transit'] };
-  if (whenValue) {
-    opts.when = new Date(whenValue);
-  }
+  const when = whenValue ? new Date(whenValue) : undefined;
 
   try {
-    const cityTraffic = await trafficService.getCityTraffic(fromCoords, toCoords, opts);
-    const carBrief = cityTraffic.car ?? null;
-    const transitBrief = cityTraffic.transit ?? null;
-
-    let enrichedCar = carBrief ? { ...carBrief, tollgates: Array.isArray(carBrief.tollgates) ? carBrief.tollgates : [] } : null;
-
-    if (carBrief) {
-      let tollgates: TrafficTollgate[] = [];
-      if (carBrief.polyline) {
-        try {
-          const tollgateResult = await trafficService.getRouteTollgates({
-            from: fromCoords,
-            to: toCoords,
-          });
-          tollgates = tollgateResult.tollgates.map(toCityTollgate);
-        } catch (error) {
-          logger.warn(
-            {
-              error: error instanceof Error ? error.message : String(error),
-              from: fromCoords,
-              to: toCoords,
-            },
-            'Failed to attach tollgates to car brief'
-          );
-        }
-      }
-      enrichedCar = { ...carBrief, tollgates };
-    }
-
-    const recommendation = recommendService.pickMode({
-      car: enrichedCar ?? undefined,
-      transit: transitBrief ?? undefined,
-      tieThresholdMin: ENV.ETA_TIE_THRESHOLD_MIN,
-    });
+    const aggregated = await trafficService.getAggregatedCityTraffic(fromCoords, toCoords, { when });
 
     logger.info(
       { from: fromCoords, to: toCoords, route: 'city' },
@@ -230,11 +158,7 @@ router.get('/city', async (req: any, res: any) => {
 
     return res.json({
       ok: true,
-      data: {
-        car: enrichedCar,
-        transit: transitBrief,
-        recommendation,
-      },
+      data: aggregated,
     });
   } catch (error) {
     logger.error(

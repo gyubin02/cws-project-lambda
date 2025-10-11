@@ -30,19 +30,16 @@ export async function buildBriefing(options: BriefingOptions): Promise<Briefing>
   const weatherPromise = weatherService.getWeatherBrief(profile?.home ?? origin, options.when);
   const airPromise = airService.getAirBrief(profile?.home ?? origin, profile?.home?.district);
 
-  const cityTrafficOptions: Parameters<typeof trafficService.getCityTraffic>[2] = {
-    modes: ['car', 'transit'],
-  };
-  if (options.when) {
-    cityTrafficOptions.when = options.when;
-  }
-
   const expresswayOptions: Parameters<typeof trafficService.getExpresswayTraffic>[2] = {};
   if (options.when) {
     expresswayOptions.when = options.when;
   }
 
-  const cityTrafficPromise = trafficService.getCityTraffic(origin, destination, cityTrafficOptions);
+  const cityTrafficPromise = trafficService.getAggregatedCityTraffic(
+    origin,
+    destination,
+    options.when ? { when: options.when } : {}
+  );
   const expresswayPromise = trafficService.getExpresswayTraffic(origin, destination, expresswayOptions);
 
   const [weatherResult, airResult, cityTrafficResult, expresswayResult] = await Promise.allSettled([
@@ -59,7 +56,7 @@ export async function buildBriefing(options: BriefingOptions): Promise<Briefing>
 
   const trafficCity = cityTrafficResult.status === 'fulfilled'
     ? cityTrafficResult.value
-    : (notices.push('traffic_city_error'), {});
+    : (notices.push('traffic_city_error'), undefined);
 
   if (cityTrafficResult.status === 'rejected') {
     notices.push('traffic_city_rejected');
@@ -74,10 +71,10 @@ export async function buildBriefing(options: BriefingOptions): Promise<Briefing>
   }
 
   const traffic: Briefing['traffic'] = {};
-  if (trafficCity && 'car' in trafficCity && trafficCity.car) {
+  if (trafficCity?.car) {
     traffic.car = trafficCity.car;
   }
-  if (trafficCity && 'transit' in trafficCity && trafficCity.transit) {
+  if (trafficCity?.transit) {
     traffic.transit = trafficCity.transit;
   }
   if (trafficExpressway.expressway) {

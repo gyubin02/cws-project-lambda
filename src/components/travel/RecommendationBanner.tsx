@@ -1,10 +1,13 @@
 import { cn } from '@/lib/utils';
-import type { CityRecommendation, TravelMode } from '@/lib/types/traffic';
+import type { TravelMode } from '@/lib/types/traffic';
 
 type RecommendationBannerProps = {
-  mode: TravelMode;
-  recommendation?: CityRecommendation | null;
+  preferred: TravelMode;
+  recommended: TravelMode;
   carEtaMinutes?: number | null;
+  transitEtaMinutes?: number | null;
+  deltaMinutes?: number | null;
+  reason?: string | null;
   className?: string;
 };
 
@@ -18,16 +21,34 @@ const formatEta = (eta?: number | null): string | null => {
   return `${Math.round(eta)} min`;
 };
 
-export function RecommendationBanner({ mode, recommendation, carEtaMinutes, className }: RecommendationBannerProps) {
-  if (mode !== 'transit') return null;
-  if (!recommendation || recommendation.mode !== 'car') return null;
+const modeLabel = (mode: TravelMode): string => (mode === 'car' ? 'Car' : 'Transit');
+const modeIcon = (mode: TravelMode): string => (mode === 'car' ? '🚗' : '🚇');
 
-  const deltaText = formatDelta(recommendation.delta_min);
-  const etaText = formatEta(carEtaMinutes);
+export function RecommendationBanner({
+  preferred,
+  recommended,
+  carEtaMinutes,
+  transitEtaMinutes,
+  deltaMinutes,
+  reason,
+  className,
+}: RecommendationBannerProps) {
+  if (recommended === preferred) return null;
 
-  const messageParts = [`🚗 Car might be faster${deltaText ? ` (by ${deltaText})` : ''}.`];
+  const deltaText = formatDelta(deltaMinutes);
+  const etaText =
+    recommended === 'car'
+      ? formatEta(carEtaMinutes)
+      : formatEta(transitEtaMinutes);
+
+  const messageParts = [
+    `${modeIcon(recommended)} ${modeLabel(recommended)} looks faster than ${modeLabel(preferred)}${deltaText ? ` (by ${deltaText})` : ''}.`,
+  ];
   if (etaText) {
     messageParts.push(`ETA ≈ ${etaText}.`);
+  }
+  if (reason) {
+    messageParts.push(reason);
   }
 
   return (

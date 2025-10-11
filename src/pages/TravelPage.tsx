@@ -17,7 +17,7 @@ import { ModeSelector } from '@/components/travel/ModeSelector';
 import { EtaCompareCard } from '@/components/travel/EtaCompareCard';
 import { RecommendationBanner } from '@/components/travel/RecommendationBanner';
 import { TollgatePanel } from '@/components/travel/TollgatePanel';
-import { fetchCar, fetchCity } from '@/lib/api/traffic';
+import { fetchCity } from '@/lib/api/traffic';
 import type {
   CarBrief,
   CityRecommendation,
@@ -99,19 +99,11 @@ export default function TravelPage() {
       setError(null);
 
       try {
-        if (mode === 'car') {
-          const car = await fetchCar({ from: fromParam, to: toParam, signal });
-          if (cancelled) return;
-          setCarBrief(car);
-          setTransitBrief(null);
-          setRecommendation(null);
-        } else {
-          const city = await fetchCity({ from: fromParam, to: toParam, signal });
-          if (cancelled) return;
-          setCarBrief(city.car ?? null);
-          setTransitBrief(city.transit ?? null);
-          setRecommendation(city.recommendation ?? null);
-        }
+        const city = await fetchCity({ from: fromParam, to: toParam, signal });
+        if (cancelled) return;
+        setCarBrief(city.car ?? null);
+        setTransitBrief(city.transit ?? null);
+        setRecommendation(city.recommendation ?? null);
       } catch (err) {
         if (cancelled) return;
         if (err instanceof DOMException && err.name === 'AbortError') return;
@@ -131,7 +123,7 @@ export default function TravelPage() {
       cancelled = true;
       controller.abort();
     };
-  }, [fromParam, toParam, mode]);
+  }, [fromParam, toParam]);
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -165,6 +157,9 @@ export default function TravelPage() {
   const showEmptyState = !fromParam || !toParam;
   const carEtaLabel = formatMinutes(carBrief?.eta_minutes);
   const transitEtaLabel = formatMinutes(transitBrief?.eta_minutes);
+  const recommendedMode = recommendation?.mode && recommendation.mode !== 'tie' ? (recommendation.mode as TravelMode) : undefined;
+  const isTie = recommendation?.mode === 'tie';
+  const mismatch = !!recommendation?.mode && !isTie && recommendation.mode !== mode;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-950 to-background text-foreground">
@@ -230,18 +225,30 @@ export default function TravelPage() {
           value={mode}
           onChange={handleModeChange}
           disabled={loading}
-          recommendation={recommendation?.mode && recommendation.mode !== 'tie' ? recommendation.mode : undefined}
+          recommendation={recommendedMode}
         />
-
-        {mode === 'transit' && recommendation?.mode === 'car' && (
-          <RecommendationBanner
-            mode={mode}
-            recommendation={recommendation}
-            carEtaMinutes={carBrief?.eta_minutes ?? null}
-          />
+        {mismatch && recommendation && (carBrief || transitBrief) && (
+          <>
+            <RecommendationBanner
+              preferred={mode}
+              recommended={recommendedMode!}
+              carEtaMinutes={carBrief?.eta_minutes ?? null}
+              transitEtaMinutes={transitBrief?.eta_minutes ?? null}
+              deltaMinutes={recommendation.delta_min ?? null}
+              reason={recommendation.reason}
+            />
+            <EtaCompareCard
+              car={carBrief || undefined}
+              transit={transitBrief || undefined}
+              selected={mode}
+              onSelect={handleModeChange}
+              recommended={recommendation.mode}
+              loading={loading}
+            />
+          </>
         )}
 
-        {mode === 'car' && carBrief && (
+        {!mismatch && mode === 'car' && carBrief && (
           <Card className="border shadow-sm">
             <CardHeader className="flex flex-col gap-2">
               <div className="flex items-center justify-between gap-3">
@@ -263,7 +270,7 @@ export default function TravelPage() {
           </Card>
         )}
 
-        {mode === 'transit' && transitBrief && (
+        {!mismatch && mode === 'transit' && transitBrief && (
           <Card className="border shadow-sm">
             <CardHeader className="flex flex-col gap-2">
               <div className="flex items-center justify-between gap-3">
@@ -291,17 +298,6 @@ export default function TravelPage() {
               {transitBrief.source && <p>Source: {transitBrief.source}</p>}
             </CardContent>
           </Card>
-        )}
-
-        {mode === 'transit' && (carBrief || transitBrief) && (
-          <EtaCompareCard
-            car={carBrief || undefined}
-            transit={transitBrief || undefined}
-            selected="transit"
-            onSelect={handleModeChange}
-            recommended={recommendation?.mode}
-            loading={loading}
-          />
         )}
 
         {activeStatus && (

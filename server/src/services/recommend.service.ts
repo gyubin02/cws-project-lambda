@@ -4,6 +4,7 @@ export type CityRecommendation = {
   mode: 'car' | 'transit' | 'tie';
   delta_min?: number;
   reasons: string[];
+  reason?: string;
 };
 
 export type RecommendInput = {
@@ -56,26 +57,32 @@ export class RecommendService {
     const transitEta = eta(transit);
 
     if (carEta == null && transitEta == null) {
-      return { mode: 'tie', reasons: ['insufficient_data'] };
+      return { mode: 'tie', reasons: ['insufficient_data'], reason: 'no data' };
     }
 
     if (carEta != null && transitEta != null) {
       const delta = Math.abs(carEta - transitEta);
       if (delta <= threshold) {
-        return { mode: 'tie', delta_min: delta, reasons: ['eta_tie'] };
+        return { mode: 'tie', delta_min: delta, reasons: ['eta_tie'], reason: 'within tie margin' };
       }
+      const recommendedMode = carEta <= transitEta ? 'car' : 'transit';
+      const deltaRounded = Math.round(delta);
       return {
-        mode: carEta <= transitEta ? 'car' : 'transit',
+        mode: recommendedMode,
         delta_min: delta,
         reasons: ['eta_gap'],
+        reason:
+          recommendedMode === 'car'
+            ? `car faster by ${deltaRounded}m`
+            : `transit faster by ${deltaRounded}m`,
       };
     }
 
     if (carEta != null) {
-      return { mode: 'car', reasons: ['transit_unavailable'] };
+      return { mode: 'car', reasons: ['transit_unavailable'], reason: 'transit missing' };
     }
 
-    return { mode: 'transit', reasons: ['car_unavailable'] };
+    return { mode: 'transit', reasons: ['car_unavailable'], reason: 'car missing' };
   }
 
   buildRecommendation(input: RecommendInput): Recommendation {

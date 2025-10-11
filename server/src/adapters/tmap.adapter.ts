@@ -3,7 +3,7 @@ import path from 'node:path';
 import { cached } from '../lib/cache';
 import { ENV } from '../lib/env';
 import { liveOrMock } from '../lib/liveOrMock';
-import { http } from '../lib/http';
+import { http, joinUrl } from '../lib/http';
 import { logger } from '../lib/logger';
 import { UpstreamError } from '../lib/errors';
 import type { Coordinates, TrafficBrief, TrafficMode, TrafficStep } from '../types';
@@ -14,15 +14,15 @@ const TRANSIT_FIXTURE_PATH = path.join(FIXTURE_DIR, 'tmap_transit.sample.json');
 const GEOCODE_FIXTURE_PATH = path.join(FIXTURE_DIR, 'tmap_geocode.sample.json');
 export const GEOCODE_LIVE_FAILURE_PREFIX = 'geocode_failed_live_only:';
 const GEOCODE_ERROR_SNIPPET_MAX = 160;
-const DEFAULT_TMAP_BASE_URL = 'https://apis.openapi.sk.com/tmap';
+const DEFAULT_TMAP_CAR_BASE_URL = 'https://apis.openapi.sk.com/tmap';
+const DEFAULT_TMAP_TRANSIT_BASE_URL = 'https://apis.openapi.sk.com/transit';
 
-const buildTmapUrl = (path: string): string => {
-  const base = (ENV.TMAP_BASE_URL || DEFAULT_TMAP_BASE_URL).replace(/\/+$/, '');
-  if (!path) {
-    return base;
-  }
-  const normalized = path.startsWith('/') ? path : `/${path}`;
-  return `${base}${normalized}`;
+const buildUrl = (kind: 'car' | 'transit', path: string): string => {
+  const base =
+    kind === 'transit'
+      ? ENV.TMAP_TRANSIT_BASE_URL || DEFAULT_TMAP_TRANSIT_BASE_URL
+      : ENV.TMAP_CAR_BASE_URL || DEFAULT_TMAP_CAR_BASE_URL;
+  return joinUrl(base, path);
 };
 
 type CachedMode = Extract<TrafficMode, 'car' | 'transit'>;
@@ -345,66 +345,159 @@ function buildCarRouteLineString(
   };
 }
 
-const formatTransitTime = (when?: Date): string | undefined => {
-  if (!when) return undefined;
-  const year = when.getFullYear();
-  const month = String(when.getMonth() + 1).padStart(2, '0');
-  const day = String(when.getDate()).padStart(2, '0');
-  const hour = String(when.getHours()).padStart(2, '0');
-  const minute = String(when.getMinutes()).padStart(2, '0');
-  return `${year}${month}${day}${hour}${minute}`;
+function formatTransitTime(when: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const yyyy = when.getFullYear();
+  const mm = pad(when.getMonth() + 1);
+  const dd = pad(when.getDate());
+  const hh = pad(when.getHours());
+  const mi = pad(when.getMinutes());
+  return `${yyyy}${mm}${dd}${hh}${mi}`;
+}
+
+type TransitParams = {
+  startX: string;
+  startY: string;
+  endX: string;
+  endY: string;
+  format: 'json';
+  lang: 0 | 1;
+  count?: number;
+  searchDttm?: string;
 };
 
-const buildTransitParams = (from: Coordinates, to: Coordinates, when?: Date): Record<string, unknown> => {
-  const params: Record<string, unknown> = {
-    startX: from.lon,
-    startY: from.lat,
-    endX: to.lon,
-    endY: to.lat,
-    reqCoordType: 'WGS84GEO',
-    resCoordType: 'WGS84GEO',
+const buildTransitParams = (from: Coordinates, to: Coordinates, when?: Date): TransitParams => {
+  const toFixed = (value: number) => value.toFixed(6);
+  const params: TransitParams = {
+    startX: toFixed(from.lon),
+    startY: toFixed(from.lat),
+    endX: toFixed(to.lon),
+    endY: toFixed(to.lat),
     format: 'json',
     lang: 0,
   };
-  const departure = formatTransitTime(when);
-  if (departure) {
-    params['departure_time'] = departure;
+  if (when) {
+    params.searchDttm = formatTransitTime(when);
   }
   return params;
 };
 
 function normalizeTransitRoute(data: any): NormalizedRoute {
   const normalized: NormalizedRoute = { segments: [] };
-  const path = data?.paths?.[0];
-  if (path) {
-    const distance = toNumber(path.summary?.distance);
-    if (distance != null && normalized.distanceMeters == null) {
-      normalized.distanceMeters = distance;
-    }
-    const duration = toNumber(path.summary?.duration);
-    if (duration != null && normalized.durationSeconds == null) {
-      normalized.durationSeconds = duration;
-    }
-    const fare = toNumber(path.summary?.fare ?? path.summary?.payment);
-    if (fare != null && normalized.fare == null) {
-      normalized.fare = fare;
-    }
-    const transfers = toNumber(path.summary?.transfers ?? path.summary?.transferCount);
-    if (transfers != null && normalized.transfers == null) {
-      normalized.transfers = transfers;
+
+  const itinerary = Array.isArray(data?.plan?.itineraries) ? data.plan.itineraries[0] : undefined;
+  if (itinerary) {
+    const distance = toNumber(
+      itinerary.totalDistance ??
+        itinerary.totalWalkDistance ??
+        itinerary.totalDistanceMeter ??
+        itinerary.totalLength
+    );
+    if (distance != null) {
+      normalized.distanceMeters ??= distance;
     }
 
-    if (Array.isArray(path.steps)) {
-      for (const step of path.steps) {
-        const seg: NormalizedSegment = { type: step?.type ?? 'walk' };
-        if (step?.name) {
-          seg.label = step.name;
+    const duration = toNumber(itinerary.totalTime ?? itinerary.totalTravelTime);
+    if (duration != null) {
+      normalized.durationSeconds ??= duration;
+    }
+
+    const fareCandidates = [
+      itinerary.fare?.regular?.totalFare,
+      itinerary.fare?.regular?.cashFare,
+      itinerary.fare?.regular?.sumFare,
+      itinerary.fare?.regularFare?.totalFare,
+      itinerary.fare?.regularFare?.fare,
+      itinerary.fare?.fare,
+      itinerary.totalFare,
+    ];
+    for (const candidate of fareCandidates) {
+      const fare = toNumber(candidate);
+      if (fare != null) {
+        normalized.fare ??= fare;
+        if (normalized.fare != null) break;
+      }
+    }
+
+    const transfer = toNumber(
+      itinerary.transferCount ?? itinerary.transfers ?? itinerary.transfer ?? itinerary.transferCnt
+    );
+    if (transfer != null) {
+      normalized.transfers ??= transfer;
+    }
+
+    if (Array.isArray(itinerary.legs)) {
+      for (const leg of itinerary.legs) {
+        const seg: NormalizedSegment = {};
+        const modeValue = typeof leg.mode === 'string' ? leg.mode.toLowerCase() : '';
+        if (modeValue.includes('walk')) {
+          seg.type = 'walk';
+        } else if (modeValue.includes('bus')) {
+          seg.type = 'bus';
+        } else if (modeValue.includes('subway') || modeValue.includes('metro') || modeValue.includes('rail')) {
+          seg.type = 'metro';
+        } else {
+          seg.type = 'walk';
         }
-        const duration = toNumber(step?.duration);
-        if (duration != null) {
-          seg.durationSeconds = duration;
+
+        const nameCandidates = [
+          leg.route,
+          leg.routeName,
+          leg.modeName,
+          leg.sectionNm,
+          leg.routeId,
+        ];
+        for (const candidate of nameCandidates) {
+          if (typeof candidate === 'string' && candidate.trim()) {
+            seg.label = candidate.trim();
+            break;
+          }
         }
+
+        const legDuration = toNumber(
+          leg.sectionTime ?? leg.duration ?? leg.time ?? leg.totalTime ?? leg.travelTime
+        );
+        if (legDuration != null) {
+          seg.durationSeconds = legDuration;
+        }
+
         normalized.segments.push(seg);
+      }
+    }
+  }
+
+  if (!normalized.durationSeconds || !normalized.distanceMeters || normalized.segments.length === 0) {
+    const path = data?.paths?.[0];
+    if (path) {
+      const distance = toNumber(path.summary?.distance);
+      if (distance != null && normalized.distanceMeters == null) {
+        normalized.distanceMeters = distance;
+      }
+      const duration = toNumber(path.summary?.duration);
+      if (duration != null && normalized.durationSeconds == null) {
+        normalized.durationSeconds = duration;
+      }
+      const fare = toNumber(path.summary?.fare ?? path.summary?.payment);
+      if (fare != null && normalized.fare == null) {
+        normalized.fare = fare;
+      }
+      const transfers = toNumber(path.summary?.transfers ?? path.summary?.transferCount);
+      if (transfers != null && normalized.transfers == null) {
+        normalized.transfers = transfers;
+      }
+
+      if (Array.isArray(path.steps)) {
+        for (const step of path.steps) {
+          const seg: NormalizedSegment = { type: step?.type ?? 'walk' };
+          if (step?.name) {
+            seg.label = step.name;
+          }
+          const stepDuration = toNumber(step?.duration);
+          if (stepDuration != null) {
+            seg.durationSeconds = stepDuration;
+          }
+          normalized.segments.push(seg);
+        }
       }
     }
   }
@@ -625,7 +718,7 @@ async function performLiveGeocode(normalizedQuery: string): Promise<Coordinates>
   }
 
   try {
-    const response = await http.get(buildTmapUrl('/geo/fullAddrGeo'), {
+    const response = await http.get(buildUrl('car', '/geo/fullAddrGeo'), {
       headers: { Accept: 'application/json', appKey: apiKey },
       params: {
         appKey: apiKey,
@@ -695,7 +788,7 @@ export class TmapAdapter {
 
         try {
           const response = await http.post(
-            buildTmapUrl(ENV.TMAP_CAR_PATH || '/routes'),
+            buildUrl('car', ENV.TMAP_CAR_PATH || '/routes'),
             {
               startX: from.lon,
               startY: from.lat,
@@ -786,10 +879,13 @@ export class TmapAdapter {
         }
 
         try {
-          const response = await http.get(buildTmapUrl(ENV.TMAP_TRANSIT_PATH || '/routes/transit'), {
-            headers: { appKey: apiKey, Accept: 'application/json' },
-            params: buildTransitParams(from, to, when),
-          });
+          const response = await http.post(
+            buildUrl('transit', ENV.TMAP_TRANSIT_PATH || '/routes'),
+            buildTransitParams(from, to, when),
+            {
+              headers: { appKey: apiKey, Accept: 'application/json', 'Content-Type': 'application/json' },
+            }
+          );
 
           const normalized = normalizeTransitRoute(response.data);
           return mapNormalizedRoute(normalized, { status: 'ok', mode: 'transit' });
