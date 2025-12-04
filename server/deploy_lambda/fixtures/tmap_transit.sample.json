@@ -1,0 +1,32 @@
+{
+  "meta": {
+    "doc": "TMAP transit summary (sample)",
+    "note": "Replace with official schema."
+  },
+  "paths": [
+    {
+      "summary": {
+        "duration": 2340,
+        "fare": 1550,
+        "transfers": 1
+      },
+      "steps": [
+        {
+          "type": "walk",
+          "name": "Walk to Station",
+          "duration": 300
+        },
+        {
+          "type": "metro",
+          "name": "Line 2",
+          "duration": 1500
+        },
+        {
+          "type": "walk",
+          "name": "Walk to Office",
+          "duration": 540
+        }
+      ]
+    }
+  ]
+}
