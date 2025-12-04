@@ -131,7 +131,12 @@ export class TrafficService {
     opts: { when?: Date } = {}
   ): Promise<AggregatedCityTraffic> {
     const { when } = opts;
-    const city = await this.getCityTraffic(from, to, { when, modes: ['car', 'transit'] });
+    const cityOpts: { when?: Date; modes: TrafficMode[] } = { modes: ['car', 'transit'] };
+    if (when) {
+      cityOpts.when = when;
+    }
+
+    const city = await this.getCityTraffic(from, to, cityOpts);
 
     let carBrief = city.car ?? null;
     const transitBrief = city.transit ?? null;
@@ -156,11 +161,13 @@ export class TrafficService {
       carBrief = { ...carBrief, tollgates };
     }
 
-    const recommendation = recommendService.pickMode({
-      car: carBrief ?? undefined,
-      transit: transitBrief ?? undefined,
-      tieThresholdMin: ENV.ETA_TIE_THRESHOLD_MIN,
-    });
+    const recommendationInput: { car?: TrafficBrief | null; transit?: TrafficBrief | null; tieThresholdMin?: number } =
+      { tieThresholdMin: ENV.ETA_TIE_THRESHOLD_MIN };
+
+    if (carBrief != null) recommendationInput.car = carBrief;
+    if (transitBrief != null) recommendationInput.transit = transitBrief;
+
+    const recommendation = recommendService.pickMode(recommendationInput);
 
     return {
       car: carBrief,

@@ -776,7 +776,11 @@ export class TmapAdapter {
         const raw = await readJsonFixture(CAR_FIXTURE_PATH);
         const normalized = normalizeCarRoute(raw);
         const polyline = buildCarRouteLineString(raw, from, to);
-        return { raw, normalized, status, note, polyline };
+        const result: CarRouteFetchResult = { raw, normalized, status, note };
+        if (polyline) {
+          result.polyline = polyline;
+        }
+        return result;
       };
 
       if (mode === 'live') {
@@ -806,7 +810,11 @@ export class TmapAdapter {
           const raw = response.data;
           const normalized = normalizeCarRoute(raw);
           const polyline = buildCarRouteLineString(raw, from, to);
-          return { raw, normalized, status: 'ok', polyline };
+          const result: CarRouteFetchResult = { raw, normalized, status: 'ok' };
+          if (polyline) {
+            result.polyline = polyline;
+          }
+          return result;
         } catch (error) {
           logger.warn(
             {

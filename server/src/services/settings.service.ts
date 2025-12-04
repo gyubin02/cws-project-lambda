@@ -1,7 +1,9 @@
 import type { UserLocationSetting, UserSettings } from '../types';
-import { storeDelete, storeGet, storeSet } from '../lib/store';
-
-const STORE_KEY = 'settings:global';
+import {
+  deleteUserSettings,
+  getUserSettingsById,
+  upsertUserSettings,
+} from '../repositories/settings.repository';
 
 function cloneLocation(setting?: UserLocationSetting): UserLocationSetting | undefined {
   if (!setting) return undefined;
@@ -35,7 +37,7 @@ function normalizeSettings(settings?: UserSettings | null): UserSettings | undef
 }
 
 export async function getUserSettings(_ctx?: unknown): Promise<UserSettings | undefined> {
-  const stored = await storeGet<UserSettings>(STORE_KEY);
+  const stored = await getUserSettingsById();
   const normalized = normalizeSettings(stored);
   return normalized ?? { coordinateLock: false };
 }
@@ -71,10 +73,10 @@ export async function saveUserSettings(
     next.coordinateLock = false;
   }
 
-  await storeSet(STORE_KEY, next);
-  return next;
+  const saved = await upsertUserSettings('global', next);
+  return saved;
 }
 
 export async function clearUserSettings(): Promise<void> {
-  await storeDelete(STORE_KEY);
+  await deleteUserSettings('global');
 }
