@@ -1,7 +1,8 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-const DATA_DIR = path.resolve(__dirname, '../../.data');
+// Use /tmp by default (Lambda writable), allow override via DATA_DIR.
+const DATA_DIR = path.resolve(process.env['DATA_DIR'] ?? '/tmp/.data');
 const STORE_PATH = path.join(DATA_DIR, 'store.json');
 
 type StorePayload = Record<string, unknown>;

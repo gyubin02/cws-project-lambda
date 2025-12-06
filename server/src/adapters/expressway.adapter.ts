@@ -8,7 +8,11 @@ import { UpstreamError } from '../lib/errors';
 import { logger } from '../lib/logger';
 import type { TrafficBrief } from '../types';
 
-const FIXTURE_PATH = path.resolve(__dirname, '../../../fixtures/expressway_tollgate.sample.json');
+const TASK_ROOT = process.env['LAMBDA_TASK_ROOT'];
+const FIXTURE_DIR = TASK_ROOT
+  ? path.join(TASK_ROOT, 'fixtures') // Lambda: /var/task/fixtures
+  : path.resolve(__dirname, '../../../fixtures'); // Local/dev: existing path
+const FIXTURE_PATH = path.join(FIXTURE_DIR, 'expressway_tollgate.sample.json');
 const EXPRESSWAY_BASE_URL = (process.env['EXPRESSWAY_BASE_URL'] ?? '').trim() ||
   'http://data.ex.co.kr/openapi/trtm';
 

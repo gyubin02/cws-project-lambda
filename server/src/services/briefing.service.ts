@@ -5,6 +5,7 @@ import { trafficService } from './traffic.service';
 import { recommendService } from './recommend.service';
 import { profileService } from './profile.service';
 import type { UserProfile } from '../types';
+import { resolveMockBriefing } from './mockBriefing.service';
 
 export type BriefingOptions = {
   userId?: string;
@@ -25,6 +26,11 @@ export async function buildBriefing(options: BriefingOptions): Promise<Briefing>
 
   if (!origin || !destination) {
     throw new Error('Origin and destination are required (via query or stored profile).');
+  }
+
+  const mockBriefing = resolveMockBriefing(origin, destination);
+  if (mockBriefing) {
+    return mockBriefing;
   }
 
   const weatherPromise = weatherService.getWeatherBrief(profile?.home ?? origin, options.when);

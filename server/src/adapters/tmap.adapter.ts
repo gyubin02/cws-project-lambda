@@ -8,7 +8,10 @@ import { logger } from '../lib/logger';
 import { UpstreamError } from '../lib/errors';
 import type { Coordinates, TrafficBrief, TrafficMode, TrafficStep } from '../types';
 
-const FIXTURE_DIR = path.resolve(__dirname, '../../../fixtures');
+const TASK_ROOT = process.env['LAMBDA_TASK_ROOT'];
+const FIXTURE_DIR = TASK_ROOT
+  ? path.join(TASK_ROOT, 'fixtures') // Lambda: /var/task/fixtures
+  : path.resolve(__dirname, '../../../fixtures'); // Local/dev: existing path
 const CAR_FIXTURE_PATH = path.join(FIXTURE_DIR, 'tmap_car.sample.json');
 const TRANSIT_FIXTURE_PATH = path.join(FIXTURE_DIR, 'tmap_transit.sample.json');
 const GEOCODE_FIXTURE_PATH = path.join(FIXTURE_DIR, 'tmap_geocode.sample.json');
@@ -929,7 +932,9 @@ export class TmapAdapter {
 
     const useMock = process.env['MOCK'] === '1' || ENV.MOCK === 1;
     const failOpen = process.env['FAIL_OPEN'] === '1';
-    const strict = process.env['GEOCODE_STRICT'] === '1';
+    // In full mock mode, always allow fixture fallback even if GEOCODE_STRICT=1.
+    const strictFlag = process.env['GEOCODE_STRICT'] === '1';
+    const strict = ENV.MOCK === 1 ? false : strictFlag;
     const fallbackAllowed = !strict && (useMock || failOpen);
 
     return cached(cacheKey, async () => {

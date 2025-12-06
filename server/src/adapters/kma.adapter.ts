@@ -8,7 +8,10 @@ import { calculateFeelsLike, mapWeatherCondition, normalizePop } from '../lib/ut
 import { latLonToGrid, mergeUltraAndVillage, selectBaseSlots } from '../lib/kma.util';
 import type { WeatherBrief, WeatherHourly } from '../types';
 
-const FIXTURE_DIR = path.resolve(__dirname, '../../../fixtures');
+const TASK_ROOT = process.env['LAMBDA_TASK_ROOT'];
+const FIXTURE_DIR = TASK_ROOT
+  ? path.join(TASK_ROOT, 'fixtures') // Lambda: /var/task/fixtures
+  : path.resolve(__dirname, '../../../fixtures'); // Local/dev: existing path
 const ULTRA_FIXTURE = path.join(FIXTURE_DIR, 'kma_ultra.sample.json');
 const VILLAGE_FIXTURE = path.join(FIXTURE_DIR, 'kma_village.sample.json');
 const KMA_BASE_URL = (process.env['KMA_BASE_URL'] ?? '').trim() || 'http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0';

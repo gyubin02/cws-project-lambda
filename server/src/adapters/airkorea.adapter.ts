@@ -8,9 +8,12 @@ import { calculateAirGrade, getAirQualityAdvice } from '../lib/util';
 import { normalizeAirPayload, pickNearestStation, wgs84ToTM } from '../lib/airkorea.util';
 import type { AirBrief } from '../types';
 
-const FIXTURE_PATH = path.resolve(__dirname, '../../../fixtures/airkorea_realtime.sample.json');
+// Use cwd as the single source of truth so Lambda (cwd=/var/task) and local both resolve correctly.
+const TASK_ROOT = process.env['LAMBDA_TASK_ROOT'] || process.cwd();
+const FIXTURE_DIR = path.join(TASK_ROOT, 'fixtures'); // e.g., /var/task/fixtures
+const FIXTURE_PATH = path.join(FIXTURE_DIR, 'airkorea_realtime.sample.json');
 const AIRKOREA_BASE_URL = (process.env['AIRKOREA_BASE_URL'] ?? '').trim() ||
-  'http://apis.data.go.kr/B552584/ArpltnInforInqireSvc';
+  'https://apis.data.go.kr/B552584/ArpltnInforInqireSvc';
 
 const readFixture = async <T>(filePath: string): Promise<T> => {
   const raw = await fs.readFile(filePath, 'utf8');

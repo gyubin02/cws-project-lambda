@@ -1,0 +1,40 @@
+{
+  "meta": {
+    "doc": "TMAP geocode (sample)",
+    "note": "Replace once real geocode endpoint is wired."
+  },
+  "results": [
+    {
+      "query": "서울특별시 중구 세종대로 110",
+      "coordinates": { "lat": 37.566295, "lon": 126.977945 }
+    },
+    {
+      "query": "서울특별시 송파구 올림픽로 300",
+      "coordinates": { "lat": 37.513068, "lon": 127.102554 }
+    },
+    {
+      "query": "서울특별시 강남구 영동대로 513",
+      "coordinates": { "lat": 37.513039, "lon": 127.056254 }
+    },
+    {
+      "query": "서울특별시 강남구 테헤란로 152",
+      "coordinates": { "lat": 37.500026, "lon": 127.036506 }
+    },
+    {
+      "query": "서울특별시 종로구 세종대로 209",
+      "coordinates": { "lat": 37.574906, "lon": 126.975205 }
+    },
+    {
+      "query": "강남역",
+      "coordinates": { "lat": 37.4979, "lon": 127.0276 }
+    },
+    {
+      "query": "서울역",
+      "coordinates": { "lat": 37.5561, "lon": 126.9725 }
+    },
+    {
+      "query": "판교역",
+      "coordinates": { "lat": 37.3943, "lon": 127.1107 }
+    }
+  ]
+}

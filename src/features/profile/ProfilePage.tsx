@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { api, ApiError } from '../../api/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -6,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { ChevronLeft } from 'lucide-react';
 
 interface UserLocationSetting {
   name: string;
@@ -156,9 +158,17 @@ const ProfilePage = () => {
               장소 이름만 입력하면 저장 시 좌표가 자동으로 계산됩니다. 필요할 때 좌표를 고정하여 재사용할 수 있어요.
             </p>
           </div>
-          <Button variant="outline" onClick={() => void loadSettings()} disabled={loading || saving}>
-            {loading ? '불러오는 중…' : '새로고침'}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" asChild>
+              <Link to="/" className="flex items-center gap-1">
+                <ChevronLeft className="h-4 w-4" />
+                뒤로 가기
+              </Link>
+            </Button>
+            <Button variant="outline" onClick={() => void loadSettings()} disabled={loading || saving}>
+              {loading ? '불러오는 중…' : '새로고침'}
+            </Button>
+          </div>
         </div>
 
         <Card>

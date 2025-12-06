@@ -12,6 +12,7 @@ import { getUserSettings } from '../services/settings.service';
 import { liveOrMock } from '../lib/liveOrMock';
 import { UpstreamError } from '../lib/errors';
 import { ControllerResult } from './types';
+import { ENV } from '../lib/env';
 
 type LocationSource = 'stored' | 'geocoded' | 'request';
 
@@ -30,6 +31,20 @@ function storedToCoordinates(setting?: UserLocationSetting | null): Coordinates 
 
 function pushWarning(warnings: string[], warning: string) {
   if (!warnings.includes(warning)) warnings.push(warning);
+}
+
+function normalizeRequestValue(value?: string): string | undefined {
+  if (value == null) return undefined;
+  const trimmed = value.trim();
+  if (trimmed === '.' || trimmed === '·') return '';
+  return trimmed;
+}
+
+function mockDotFallback(label: 'origin' | 'destination'): Coordinates | undefined {
+  if (ENV.MOCK !== 1) return undefined;
+  return label === 'origin'
+    ? { lat: 37.500026, lon: 127.036506 } // 서울특별시 강남구 테헤란로 152
+    : { lat: 37.574906, lon: 126.975205 }; // 서울특별시 종로구 세종대로 209
 }
 
 async function resolveLocation({
@@ -51,7 +66,7 @@ async function resolveLocation({
     return { coordinates: storedCoords, source: 'stored' };
   }
 
-  const trimmed = requestValue?.trim();
+  const trimmed = normalizeRequestValue(requestValue);
 
   if (trimmed) {
     if (isCoordinateLike(trimmed)) {
@@ -102,6 +117,11 @@ async function resolveLocation({
 
   if (storedCoords) {
     return { coordinates: storedCoords, source: 'stored' };
+  }
+
+  const dotFallback = mockDotFallback(label);
+  if (dotFallback) {
+    return { coordinates: dotFallback, source: 'stored' };
   }
 
   return {

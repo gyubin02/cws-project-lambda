@@ -6,10 +6,11 @@ import type { CarBrief, TransitBrief, TravelMode } from '@/lib/types/traffic';
 type EtaCompareCardProps = {
   car?: CarBrief;
   transit?: TransitBrief;
-  selected: TravelMode;
-  onSelect: (mode: TravelMode) => void;
+  selected?: TravelMode;
+  onSelect?: (mode: TravelMode) => void;
   recommended?: TravelMode | 'tie';
   loading?: boolean;
+  readOnly?: boolean;
 };
 
 type ModeBrief = {
@@ -45,7 +46,7 @@ const formatTransfers = (value?: number): string | null => {
   return `${value} transfers`;
 };
 
-export function EtaCompareCard({ car, transit, selected, onSelect, recommended, loading }: EtaCompareCardProps) {
+export function EtaCompareCard({ car, transit, selected = 'car', onSelect, recommended, loading, readOnly }: EtaCompareCardProps) {
   const modes: ModeBrief[] = [
     { mode: 'car', label: MODE_LABEL.car, brief: car },
     { mode: 'transit', label: MODE_LABEL.transit, brief: transit },
@@ -54,23 +55,13 @@ export function EtaCompareCard({ car, transit, selected, onSelect, recommended, 
   return (
     <Card className="divide-y border shadow-sm">
       {modes.map(({ mode, label, brief }) => {
-        const active = selected === mode;
+        const active = !readOnly && selected === mode;
         const isRecommended = recommended === mode;
         const disabled = !brief;
         const showStatus = brief?.source_status && brief.source_status !== 'ok';
-        return (
-          <button
-            key={mode}
-            type="button"
-            disabled={disabled || loading}
-            onClick={() => onSelect(mode)}
-            className={cn(
-              'flex w-full flex-col gap-2 p-4 text-left transition-colors',
-              !disabled && 'hover:bg-muted/60',
-              active && 'bg-muted/70',
-              disabled && 'cursor-not-allowed opacity-60'
-            )}
-          >
+        const clickable = !!onSelect && !readOnly && !disabled && !loading;
+        const content = (
+          <>
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-sm font-semibold">{label}</p>
@@ -110,7 +101,38 @@ export function EtaCompareCard({ car, transit, selected, onSelect, recommended, 
                 Data status: {brief?.source_status}
               </p>
             )}
-          </button>
+          </>
+        );
+
+        if (clickable) {
+          return (
+            <button
+              key={mode}
+              type="button"
+              disabled={disabled || loading}
+              onClick={() => onSelect(mode)}
+              className={cn(
+                'flex w-full flex-col gap-2 p-4 text-left transition-colors',
+                !disabled && 'hover:bg-muted/60',
+                active && 'bg-muted/70',
+                disabled && 'cursor-not-allowed opacity-60'
+              )}
+            >
+              {content}
+            </button>
+          );
+        }
+
+        return (
+          <div
+            key={mode}
+            className={cn(
+              'flex w-full flex-col gap-2 p-4 text-left',
+              disabled && 'opacity-60'
+            )}
+          >
+            {content}
+          </div>
         );
       })}
     </Card>
